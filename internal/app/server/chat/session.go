@@ -196,13 +196,14 @@ func (c *ChatSession) HandleTextMessage(message []byte) error {
 
 // HandleAudioMessage 处理音频消息
 func (c *ChatSession) HandleAudioMessage(data []byte) bool {
-	select {
-	case c.clientState.OpusAudioBuffer <- data:
-		return true
-	default:
+
+	 c.clientState.OpusAudioBuffer <- data
+	
+	if len(c.clientState.OpusAudioBuffer) >= 100 {
+		<-c.clientState.OpusAudioBuffer //丢包
 		log.Warnf("音频缓冲区已满, 丢弃音频数据")
 	}
-	return false
+	return true
 }
 
 // handleHelloMessage 处理 hello 消息
