@@ -189,7 +189,7 @@ func (m *Memory) GetSystemPrompt(ctx context.Context, deviceID string) (schema.M
 			m.SetSystemPrompt(ctx, deviceID, prompt)
 			return schema.Message{
 				Role:    schema.System,
-				Content: viper.GetString("system_prompt"),
+				Content: prompt,
 			}, nil
 		}
 	}
