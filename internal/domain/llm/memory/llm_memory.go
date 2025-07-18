@@ -183,6 +183,17 @@ func (m *Memory) GetSystemPrompt(ctx context.Context, deviceID string) (schema.M
 		return schema.Message{}, nil
 	}
 
+	exist, _ := m.redisClient.Exists(ctx, key).Result()
+	if exist <= 0 {
+		if prompt := viper.GetString("system_prompt"); prompt != "" {
+			m.SetSystemPrompt(ctx, deviceID, prompt)
+			return schema.Message{
+				Role:    schema.System,
+				Content: viper.GetString("system_prompt"),
+			}, nil
+		}
+	}
+
 	key := m.getSystemPromptKey(deviceID)
 
 	result, err := m.redisClient.Get(ctx, key).Result()
