@@ -94,7 +94,8 @@ func (app *App) newUdpServer() (*mqtt_udp.UdpServer, error) {
 
 func (app *App) newWebSocketServer() *websocket.WebSocketServer {
 	port := viper.GetInt("websocket.port")
-	return websocket.NewWebSocketServer(port, websocket.WithOnNewConnection(app.OnNewConnection))
+	host := viper.GetString("websocket.host")
+	return websocket.NewWebSocketServer(port,host, websocket.WithOnNewConnection(app.OnNewConnection))
 }
 
 func (app *App) startMqttServer() error {
