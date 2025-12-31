@@ -20,6 +20,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 
+	"github.com/cloudwego/eino/components/prompt"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	mcp_go "github.com/mark3labs/mcp-go/mcp"
@@ -239,7 +240,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 							}*/
 
 						lctx := context.WithValue(ctx, "nest", 2)
-						invokeToolSuccess, err := l.handleToolCallResponse(lctx, userMessage, schema.AssistantMessage(fullText.String(), toolCalls), toolCalls)
+						invokeToolSuccess, err := l.HandleToolCallResponse(lctx, userMessage, schema.AssistantMessage(fullText.String(), toolCalls), toolCalls)
 						if err != nil {
 							log.Errorf("处理工具调用响应失败: %v", err)
 							return true, fmt.Errorf("处理工具调用响应失败: %v", err)
@@ -269,7 +270,7 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 }
 
 // handleToolCallResponse 处理工具调用响应
-func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *schema.Message, respMsg *schema.Message, tools []schema.ToolCall) (bool, error) {
+func (l *LLMManager) HandleToolCallResponse(ctx context.Context, userMessage *schema.Message, respMsg *schema.Message, tools []schema.ToolCall) (bool, error) {
 	if len(tools) == 0 {
 		return false, nil
 	}
@@ -329,55 +330,9 @@ func (l *LLMManager) handleToolCallResponse(ctx context.Context, userMessage *sc
 			log.Infof("工具调用结果 %s, 耗时: %dms", fcResult, costTs)
 		}
 
-		var result string = fcResult
-		var contentList []mcp_go.Content
-		if mcpResp, ok := l.handleLocalToolResult(fcResult); ok {
-			/*if mcpResp.IsTerminal() {
-				log.Infof("工具调用结果: %s, 终止: %t", fcResult, mcpResp.IsTerminal())
-				return invokeToolSuccess, nil
-			}*/
-			contentList = mcpResp.GetContent()
-		} else if toolCallResult, ok := l.handleToolResult(fcResult); ok {
-			if toolCallResult.IsError {
-				log.Errorf("工具调用失败: %s, 错误: %s", fcResult, toolCallResult.IsError)
-			}
-			contentList = toolCallResult.Content
-		}
-		if len(contentList) > 0 {
-			var mcpContent string
-			//如果有audio数据, 则进行播放
-			for _, content := range contentList {
-				if audioContent, ok := content.(mcp_go.AudioContent); ok {
-					log.Debugf("调用工具 %s 返回音频资源长度: %d", toolName, len(audioContent.Data))
-
-					mcpContent = "执行成功"
-					//播放音频资源,此时mcpContent是
-					err := l.handleAudioContent(ctx, mcpContent, audioContent, &wg)
-					if err != nil {
-						log.Errorf("mcp播放音频资源失败: %v", err)
-						mcpContent = "执行失败"
-					}
-					shouldStopLLMProcessing = true
-					break
-				} else if resourceLink, ok := content.(mcp_go.ResourceLink); ok {
-					log.Debugf("调用工具 %s 返回资源链接: %+v", toolName, resourceLink)
-					mcpContent = "执行成功"
-					err := l.handleResourceLink(ctx, resourceLink, tool, &wg)
-					if err != nil {
-						log.Errorf("mcp播放资源链接失败: %v", err)
-						mcpContent = "执行失败"
-					}
-
-					shouldStopLLMProcessing = true
-					break
-				} else if textContent, ok := content.(mcp_go.TextContent); ok {
-					log.Debugf("调用工具 %s 返回文本资源长度: %s", toolName, textContent.Text)
-					mcpContent += textContent.Text
-				}
-			}
-			if mcpContent != "" {
-				result = mcpContent
-			}
+		result, shouldStop := l.processToolCallResult(ctx, toolName, fcResult, tool, &wg)
+		if shouldStop {
+			shouldStopLLMProcessing = true
 		}
 		addMessageFunc(toolCall, result)
 	}
@@ -579,6 +534,55 @@ func (l *LLMManager) handleAudioContent(ctx context.Context, realMusicName strin
 	return nil
 }
 
+// processToolCallResult 处理工具调用结果，提取并处理音频、资源链接、文本等内容
+// 返回处理后的结果字符串和是否应该停止 LLM 处理
+func (l *LLMManager) processToolCallResult(ctx context.Context, toolName string, fcResult string, toolCall tool.InvokableTool, wg *sync.WaitGroup) (string, bool) {
+	var result string = fcResult
+	var contentList []mcp_go.Content
+	if mcpResp, ok := l.handleLocalToolResult(fcResult); ok {
+		contentList = mcpResp.GetContent()
+	} else if toolCallResult, ok := l.handleToolResult(fcResult); ok {
+		if toolCallResult.IsError {
+			log.Errorf("工具调用失败: %s, 错误: %s", fcResult, toolCallResult.IsError)
+		}
+		contentList = toolCallResult.Content
+	}
+	if len(contentList) > 0 {
+		var mcpContent string
+		//如果有audio数据, 则进行播放
+		for _, content := range contentList {
+			if audioContent, ok := content.(mcp_go.AudioContent); ok {
+				log.Debugf("调用工具 %s 返回音频资源长度: %d", toolName, len(audioContent.Data))
+
+				mcpContent = "执行成功"
+				//播放音频资源,此时mcpContent是
+				err := l.handleAudioContent(ctx, mcpContent, audioContent, wg)
+				if err != nil {
+					log.Errorf("mcp播放音频资源失败: %v", err)
+					mcpContent = "执行失败"
+				}
+				return mcpContent, true
+			} else if resourceLink, ok := content.(mcp_go.ResourceLink); ok {
+				log.Debugf("调用工具 %s 返回资源链接: %+v", toolName, resourceLink)
+				mcpContent = "执行成功"
+				err := l.handleResourceLink(ctx, resourceLink, toolCall, wg)
+				if err != nil {
+					log.Errorf("mcp播放资源链接失败: %v", err)
+					mcpContent = "执行失败"
+				}
+				return mcpContent, true
+			} else if textContent, ok := content.(mcp_go.TextContent); ok {
+				log.Debugf("调用工具 %s 返回文本资源长度: %s", toolName, textContent.Text)
+				mcpContent += textContent.Text
+			}
+		}
+		if mcpContent != "" {
+			result = mcpContent
+		}
+	}
+	return result, false
+}
+
 func (l *LLMManager) handleLocalToolResult(toolResult string) (MCPResponse, bool) {
 	// 首先尝试解析新的结构化响应
 	var response MCPResponse
@@ -653,13 +657,38 @@ func (l *LLMManager) AddLlmMessage(ctx context.Context, msg *schema.Message) err
 }
 
 func (l *LLMManager) GetMessages(ctx context.Context, userMessage *schema.Message, count int) []*schema.Message {
+	chatTemplate := l.GetMessagesTemplates(ctx)
+
+	variables := l.GetTemplateVariables(ctx, userMessage, count)
+	msgList, err := chatTemplate.Format(ctx, variables)
+	if err != nil {
+		log.Errorf("格式化消息失败: %v", err)
+		return nil
+	}
+	return msgList
+
+}
+
+func (l *LLMManager) GetMessagesTemplates(ctx context.Context) prompt.ChatTemplate {
+	// 构建 system prompt
+	systemTpl := fmt.Sprintf("{system_prompt} \n {user_prompt} \n {user_profile} \n {history_context}")
+
+	return prompt.FromMessages(schema.FString,
+		schema.SystemMessage(systemTpl),
+		schema.MessagesPlaceholder("message_histories", true),
+		schema.UserMessage("{user_query}"),
+	)
+}
+
+// 获取模板所需变量数据
+func (l *LLMManager) GetTemplateVariables(ctx context.Context, userMessage *schema.Message, count int) map[string]any {
 	//从dialogue中获取
 	messageList := l.clientState.GetMessages(count)
 
-	// 构建 system prompt
-	systemPrompt := l.clientState.SystemPrompt
+	var userProfile, historyContext string
+
 	if l.clientState.MemoryContext != "" {
-		systemPrompt += fmt.Sprintf("\n用户个性化信息: \n%s", l.clientState.MemoryContext)
+		userProfile = fmt.Sprintf("\n用户个性化信息:\n %s", l.clientState.MemoryContext)
 	}
 
 	//search memory
@@ -670,18 +699,15 @@ func (l *LLMManager) GetMessages(ctx context.Context, userMessage *schema.Messag
 		}
 		log.Debugf("搜索记忆成功, 输入内容: %s, 记忆内容: %s", userMessage.Content, memoryContext)
 		if memoryContext != "" {
-			systemPrompt += fmt.Sprintf("\n历史关联信息: \n%s", memoryContext)
+			historyContext = fmt.Sprintf("\n以下是相关对话:\n %s", memoryContext)
 		}
 	}
-
-	retMessage := make([]*schema.Message, 0)
-	retMessage = append(retMessage, &schema.Message{
-		Role:    schema.System,
-		Content: systemPrompt,
-	})
-	retMessage = append(retMessage, messageList...)
-	if userMessage != nil {
-		retMessage = append(retMessage, userMessage)
+	return map[string]any{
+		"system_prompt":   "",                         //系统全局prompt
+		"user_prompt":     l.clientState.SystemPrompt, //agent专属prompt
+		"user_profile":    userProfile,                //用户个性化信息
+		"history_context": historyContext,             //历史相关对话
+		"message_list":    messageList,                //历史消息
+		"user_query":      userMessage.Content,        //用户输入
 	}
-	return retMessage
 }

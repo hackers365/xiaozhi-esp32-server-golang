@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"xiaozhi-esp32-server-golang/internal/data/client"
 	"xiaozhi-esp32-server-golang/internal/util"
 )
 
@@ -68,7 +67,8 @@ func TestGenerateUUID(t *testing.T) {
 // 如果要全面测试，需要准备有效的WAV数据并验证转换结果
 func TestWavToOpus_InvalidData(t *testing.T) {
 	// 测试无效的WAV数据
-	_, err := util.WavToOpus([]byte("这不是WAV数据"), client.SampleRate, client.Channels, client.FrameDuration)
+	// 使用标准音频参数：sampleRate=16000, channels=1, bitRate=64000
+	_, err := util.WavToOpus([]byte("这不是WAV数据"), 16000, 1, 64000)
 	if err == nil {
 		t.Error("期望处理无效数据时返回错误，但没有")
 	}
@@ -115,7 +115,8 @@ func TestByteProviderTextToSpeech(t *testing.T) {
 	}
 
 	// 使用TextToSpeech方法
-	audioFrames, err := provider.TextToSpeech(context.Background(), testText)
+	// 使用标准音频参数：sampleRate=16000, channels=1, frameDuration=20
+	audioFrames, err := provider.TextToSpeech(context.Background(), testText, 16000, 1, 20)
 	if err != nil {
 		t.Fatalf("TextToSpeech失败: %v", err)
 	}

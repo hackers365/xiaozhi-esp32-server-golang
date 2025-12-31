@@ -520,7 +520,7 @@ func sendTextToSpeech(conn *websocket.Conn, deviceID string) error {
 	}
 	_ = edgeConfig
 	//调用tts服务生成语音
-	ttsProvider, err := tts.GetTTSProvider("cosyvoice", cosyVoiceConfig)
+	ttsProvider, err := tts.GetTTSProvider("edge", edgeConfig)
 	if err != nil {
 		return fmt.Errorf("获取tts服务失败: %v", err)
 	}

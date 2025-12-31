@@ -4,48 +4,31 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"strings"
+	"io"
 	"time"
-	"unicode"
 	"xiaozhi-esp32-server-golang/internal/domain/llm/common"
 
+	. "xiaozhi-esp32-server-golang/internal/util/sentence"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/schema"
 )
 
-// 句子结束的标点符号
-var sentenceEndPunctuation = []rune{'.', '。', '!', '！', '?', '？', '\n'}
-
-// 句子暂停的标点符号（可以作为长句子的断句点）
-var sentencePausePunctuation = []rune{',', '，', ';', '；', ':', '：'}
-
-// 判断一个字符是否为句子结束的标点符号
-func isSentenceEndPunctuation(r rune) bool {
-	for _, p := range sentenceEndPunctuation {
-		if r == p {
-			return true
-		}
-	}
-	return false
-}
-
-// 判断一个字符是否为句子暂停的标点符号
-func isSentencePausePunctuation(r rune) bool {
-	for _, p := range sentencePausePunctuation {
-		if r == p {
-			return true
-		}
-	}
-	return false
-}
-
 // HandleLLMWithContextAndTools 使用上下文控制来处理LLM响应（兼容带工具和不带工具）
-func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, dialogue []*schema.Message, tools []*schema.ToolInfo, sessionID string) (chan common.LLMResponseStruct, error) {
-	var (
-		llmResponse interface{}
-	)
-	llmResponse = llmProvider.ResponseWithContext(ctx, sessionID, dialogue, tools)
+func HandleLLMWithContextAndTools(ctx context.Context, llmProvider common.LLMProvider, dialogue []*schema.Message, tools []*schema.ToolInfo, sessionID string) (chan common.LLMResponseStruct, error) {
+
+	newLlmProvider, err := llmProvider.WithTools(tools)
+	if err != nil {
+		log.Errorf("WithTools 失败: %v", err)
+		return nil, err
+	}
+	llmProvider = newLlmProvider
+
+	llmStreamReader, err := llmProvider.Stream(ctx, dialogue)
+	if err != nil {
+		log.Errorf("Stream 失败: %v", err)
+		return nil, err
+	}
 
 	sentenceChannel := make(chan common.LLMResponseStruct, 2)
 	startTs := time.Now().UnixMilli()
@@ -59,18 +42,16 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 			log.Debugf("full Response with %d tools, fullText: %s", len(tools), fullText)
 			close(sentenceChannel)
 		}()
-		msgChan, ok := llmResponse.(chan *schema.Message)
-		if !ok {
-			log.Errorf("llmResponse 断言为 chan *schema.Message 失败")
-			return
-		}
 		for {
 			select {
 			case <-ctx.Done():
 				log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
 				return
-			case message, ok := <-msgChan:
-				if !ok {
+			default:
+			}
+			message, err := llmStreamReader.Recv()
+			if err != nil {
+				if err == io.EOF {
 					remaining := buffer.String()
 					if remaining != "" {
 						log.Infof("处理剩余内容: %s", remaining)
@@ -98,116 +79,67 @@ func HandleLLMWithContextAndTools(ctx context.Context, llmProvider LLMProvider, 
 					}
 					return
 				}
-				if message == nil {
-					break
-				}
-				byteMessage, _ := json.Marshal(message)
-				log.Infof("收到message: %s", string(byteMessage))
-				if message.Content != "" {
-					fullText += message.Content
-					buffer.WriteString(message.Content)
-					if containsSentenceSeparator(message.Content, isFirst) {
-						sentences, remaining := extractSmartSentences(buffer.String(), 2, 100, isFirst)
-						if len(sentences) > 0 {
-							for _, sentence := range sentences {
-								if sentence != "" {
-									if !firstFrame {
-										firstFrame = true
-										log.Infof("耗时统计: llm工具首句: %d ms", time.Now().UnixMilli()-startTs)
-									}
-									log.Infof("处理完整句子: %s", sentence)
-									select {
-									case <-ctx.Done():
-										log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
-										return
-									case sentenceChannel <- common.LLMResponseStruct{
-										Text:    sentence,
-										IsStart: isFirst,
-										IsEnd:   false,
-									}:
-									}
+			}
+			if message == nil {
+				break
+			}
+			byteMessage, _ := json.Marshal(message)
+			log.Infof("收到message: %s", string(byteMessage))
+			if message.Content != "" {
+				fullText += message.Content
+				buffer.WriteString(message.Content)
+				if ContainsSentenceSeparator(message.Content, isFirst) {
+					sentences, remaining := ExtractSmartSentences(buffer.String(), 2, 100, isFirst)
+					if len(sentences) > 0 {
+						for _, sentence := range sentences {
+							if sentence != "" {
+								if !firstFrame {
+									firstFrame = true
+									log.Infof("耗时统计: llm工具首句: %d ms", time.Now().UnixMilli()-startTs)
+								}
+								log.Infof("处理完整句子: %s", sentence)
+								select {
+								case <-ctx.Done():
+									log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
+									return
+								case sentenceChannel <- common.LLMResponseStruct{
+									Text:    sentence,
+									IsStart: isFirst,
+									IsEnd:   false,
+								}:
+								}
 
-									if isFirst {
-										isFirst = false
-									}
+								if isFirst {
+									isFirst = false
 								}
 							}
 						}
-						buffer.Reset()
-						buffer.WriteString(remaining)
-						if isFirst {
-							isFirst = false
-						}
 					}
-				}
-				// 工具调用响应（假设 ToolCalls 字段）
-				if message.ToolCalls != nil && len(message.ToolCalls) > 0 {
-					log.Infof("处理工具调用: %+v", message.ToolCalls)
-					select {
-					case <-ctx.Done():
-						log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
-						return
-					case sentenceChannel <- common.LLMResponseStruct{
-						ToolCalls: message.ToolCalls,
-						IsStart:   isFirst,
-						IsEnd:     false,
-					}:
+					buffer.Reset()
+					buffer.WriteString(remaining)
+					if isFirst {
+						isFirst = false
 					}
 				}
 			}
+			// 工具调用响应（假设 ToolCalls 字段）
+			if message.ToolCalls != nil && len(message.ToolCalls) > 0 {
+				log.Infof("处理工具调用: %+v", message.ToolCalls)
+				select {
+				case <-ctx.Done():
+					log.Infof("上下文已取消，停止LLM响应处理: %v, context done, exit", ctx.Err())
+					return
+				case sentenceChannel <- common.LLMResponseStruct{
+					ToolCalls: message.ToolCalls,
+					IsStart:   isFirst,
+					IsEnd:     false,
+				}:
+				}
+			}
 		}
+
 	}()
 	return sentenceChannel, nil
-}
-
-// 判断字符串是否为数字加点号格式（如"1."、"2."等）
-func isNumberWithDot(s string) bool {
-	trimmed := strings.TrimSpace(s)
-	if len(trimmed) < 2 || trimmed[len(trimmed)-1] != '.' {
-		return false
-	}
-
-	for i := 0; i < len(trimmed)-1; i++ {
-		if !unicode.IsDigit(rune(trimmed[i])) {
-			return false
-		}
-	}
-	return true
-}
-
-// 从文本中提取完整的句子
-// 返回完整句子的切片和剩余的未完成内容
-func extractCompleteSentences(text string) ([]string, string) {
-	if text == "" {
-		return []string{}, ""
-	}
-
-	var sentences []string
-	var currentSentence bytes.Buffer
-
-	runes := []rune(text)
-	lastIndex := len(runes) - 1
-
-	for i, r := range runes {
-		currentSentence.WriteRune(r)
-
-		// 判断句子是否结束
-		if isSentenceEndPunctuation(r) {
-			// 如果是句子结束标点
-			sentence := strings.TrimSpace(currentSentence.String())
-			if sentence != "" {
-				sentences = append(sentences, sentence)
-			}
-			currentSentence.Reset()
-		} else if i == lastIndex {
-			// 如果是最后一个字符但不是句子结束标点，保留在remaining中
-			break
-		}
-	}
-
-	// 当前未完成的句子作为remaining返回
-	remaining := currentSentence.String()
-	return sentences, strings.TrimSpace(remaining)
 }
 
 // ConvertMCPToolsToEinoTools 将MCP工具转换为Eino ToolInfo格式

@@ -13,6 +13,7 @@ import (
 	utypes "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
+	llm_types "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	"xiaozhi-esp32-server-golang/internal/domain/memory"
 	"xiaozhi-esp32-server-golang/internal/domain/tts"
 
@@ -81,7 +82,8 @@ type ClientState struct {
 	OutputAudioFormat AudioFormat //输出音频格式
 
 	// opus接收的音频数据缓冲区
-	OpusAudioBuffer chan []byte
+	OpusAudioBufferWriter *schema.StreamWriter[[]byte]
+	OpusAudioBufferReader *schema.StreamReader[[]byte]
 
 	// pcm接收的音频数据缓冲区
 	AsrAudioBuffer *AsrAudioBuffer
@@ -289,7 +291,7 @@ func (c *Ctx) Cancel() {
 	}
 }
 
-func (s *ClientState) getLLMProvider() (llm.LLMProvider, error) {
+func (s *ClientState) getLLMProvider() (llm_types.LLMProvider, error) {
 	llmConfig := s.DeviceConfig.Llm
 	llmType, ok := llmConfig.Config["type"]
 	if !ok {
@@ -388,7 +390,7 @@ type Llm struct {
 	Ctx    context.Context
 	Cancel context.CancelFunc
 	// LLM 提供者
-	LLMProvider llm.LLMProvider
+	LLMProvider llm_types.LLMProvider
 	//asr to text接收的通道
 	LLmRecvChannel chan llm_common.LLMResponseStruct
 }

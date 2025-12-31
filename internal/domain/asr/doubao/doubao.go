@@ -3,12 +3,15 @@ package doubao
 import (
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/domain/asr/doubao/client"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/doubao/response"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // DoubaoV2ASR 豆包ASR实现
@@ -65,7 +68,7 @@ func NewDoubaoV2ASR(config DoubaoV2Config) (*DoubaoV2ASR, error) {
 }
 
 // StreamingRecognize 实现流式识别接口
-func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error) {
+func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream *schema.StreamReader[[]float32]) (chan types.StreamingResult, error) {
 	// 建立连接
 	d.c = client.NewAsrWsClient(d.config.WsURL, d.config.AppID, d.config.AccessToken)
 
@@ -86,7 +89,25 @@ func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream <-chan
 	}
 
 	go func() {
-		err = d.c.StartAudioStream(ctx, audioStream, doubaoResultChan)
+		audioStreamChan := make(chan []float32, 30)
+		go func() {
+			defer close(audioStreamChan)
+			for {
+				pcmChunk, err := audioStream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						return
+					}
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case audioStreamChan <- pcmChunk:
+				}
+			}
+		}()
+		err = d.c.StartAudioStream(ctx, audioStreamChan, doubaoResultChan)
 	}()
 
 	// 启动音频发送goroutine

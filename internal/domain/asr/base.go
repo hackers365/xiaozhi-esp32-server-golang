@@ -8,6 +8,8 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/asr/doubao"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // Asr 语音识别接口
@@ -19,7 +21,7 @@ type AsrProvider interface {
 	// 输入音频数据通过 audioStream 通道，识别结果通过返回的通道获取
 	// 当 audioStream 被关闭时，表示输入结束，最终结果将会通过返回的通道发送，然后关闭该通道
 	// 可以通过 ctx 控制识别过程的取消和超时
-	StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error)
+	StreamingRecognize(ctx context.Context, audioStream *schema.StreamReader[[]float32]) (chan types.StreamingResult, error)
 }
 
 // NewAsrProvider 创建一个新的ASR实例

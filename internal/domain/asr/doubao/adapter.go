@@ -6,6 +6,8 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // DoubaoV2Adapter 适配器，实现现有的AsrProvider接口
@@ -76,6 +78,6 @@ func (d *DoubaoV2Adapter) Process(pcmData []float32) (string, error) {
 }
 
 // StreamingRecognize 实现流式识别接口
-func (d *DoubaoV2Adapter) StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error) {
+func (d *DoubaoV2Adapter) StreamingRecognize(ctx context.Context, audioStream *schema.StreamReader[[]float32]) (chan types.StreamingResult, error) {
 	return d.engine.StreamingRecognize(ctx, audioStream)
 }

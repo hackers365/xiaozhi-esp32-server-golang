@@ -1,30 +1,12 @@
 package llm
 
 import (
-	"context"
 	"fmt"
 
-	"github.com/cloudwego/eino/schema"
-
 	"xiaozhi-esp32-server-golang/constants"
+	. "xiaozhi-esp32-server-golang/internal/domain/llm/common"
 	"xiaozhi-esp32-server-golang/internal/domain/llm/eino_llm"
 )
-
-// LLMProvider 大语言模型提供者接口
-// 所有LLM实现必须遵循此接口，使用Eino原生类型
-type LLMProvider interface {
-	// ResponseWithContext 带有上下文控制的响应，支持取消操作
-	// ctx: 上下文，可用于取消长时间运行的请求
-	// sessionID: 会话标识符
-	// dialogue: 对话历史，使用Eino原生消息类型
-	ResponseWithContext(ctx context.Context, sessionID string, dialogue []*schema.Message, functions []*schema.ToolInfo) chan *schema.Message
-
-	ResponseWithVllm(ctx context.Context, file []byte, text string, mimeType string) (string, error)
-
-	// GetModelInfo 获取模型信息
-	// 返回模型名称和其他元数据
-	GetModelInfo() map[string]interface{}
-}
 
 // LLMFactory 大语言模型工厂接口
 // 用于创建不同类型的LLM提供者

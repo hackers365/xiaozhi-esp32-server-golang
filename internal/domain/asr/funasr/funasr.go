@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -12,6 +13,7 @@ import (
 
 	log "xiaozhi-esp32-server-golang/logger"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/gorilla/websocket"
 
 	"xiaozhi-esp32-server-golang/internal/data/audio"
@@ -242,7 +244,7 @@ func (f *Funasr) writeMessage(conn *websocket.Conn, messageType int, data []byte
 // StreamingRecognize 实现流式识别
 // 从audioStream接收音频数据，通过resultChan返回结果
 // 可以通过ctx控制识别过程的取消和超时
-func (f *Funasr) StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error) {
+func (f *Funasr) StreamingRecognize(ctx context.Context, audioStream *schema.StreamReader[[]float32]) (chan types.StreamingResult, error) {
 	// 获取一个连接
 	conn, err := f.getConnection()
 	if err != nil {
@@ -345,7 +347,7 @@ func (f *Funasr) recvResult(ctx context.Context, conn *websocket.Conn, resultCha
 	}
 }
 
-func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.CancelFunc, conn *websocket.Conn, audioStream <-chan []float32) {
+func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.CancelFunc, conn *websocket.Conn, audioStream *schema.StreamReader[[]float32]) {
 	sendEndMsg := func() {
 		// 发送终止消息
 		endMessage := FunasrRequest{
@@ -372,25 +374,30 @@ func (f *Funasr) forwardStreamAudio(ctx context.Context, cancelFunc context.Canc
 			cancelFunc() // 确保结束时取消上下文，通知接收goroutine
 			sendEndMsg()
 			return
-		case pcmChunk, ok := <-audioStream:
-			if !ok {
-				// 通道已关闭，结束输入
+		default:
+		}
+		pcmChunk, err := audioStream.Recv()
+		if err != nil {
+			if err == io.EOF {
 				sendEndMsg()
 				return
 			}
-
-			// 转换PCM数据为字节
-			audioBytes := Float32SliceToBytes(pcmChunk)
-
-			log.Debugf("funasr forwardStreamAudio 发送音频数据, pcmChunk len: %v, audioBytes len: %v", len(pcmChunk), len(audioBytes))
-
-			// 发送音频数据
-			err := f.writeMessage(conn, websocket.BinaryMessage, audioBytes)
-			if err != nil {
-				log.Debugf("funasr forwardStreamAudio 发送音频数据失败: %v", err)
-				return
-			}
+			log.Debugf("funasr forwardStreamAudio 读取音频数据失败: %v", err)
+			return
 		}
+
+		// 转换PCM数据为字节
+		audioBytes := Float32SliceToBytes(pcmChunk)
+
+		log.Debugf("funasr forwardStreamAudio 发送音频数据, pcmChunk len: %v, audioBytes len: %v", len(pcmChunk), len(audioBytes))
+
+		// 发送音频数据
+		err = f.writeMessage(conn, websocket.BinaryMessage, audioBytes)
+		if err != nil {
+			log.Debugf("funasr forwardStreamAudio 发送音频数据失败: %v", err)
+			return
+		}
+
 	}
 }
 

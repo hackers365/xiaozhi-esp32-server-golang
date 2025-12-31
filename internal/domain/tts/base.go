@@ -3,6 +3,7 @@ package tts
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"xiaozhi-esp32-server-golang/constants"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/cosyvoice"
@@ -10,7 +11,11 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge_offline"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/openai"
+	"xiaozhi-esp32-server-golang/internal/domain/tts/types"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/xiaozhi"
+	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // 基础TTS提供者接口（不含Context方法）
@@ -22,6 +27,8 @@ type BaseTTSProvider interface {
 // 完整TTS提供者接口（包含Context方法）
 type TTSProvider interface {
 	BaseTTSProvider
+	Invoke(ctx context.Context, text string, opts ...types.Option) ([][]byte, error)
+	Transform(ctx context.Context, input *schema.StreamReader[*schema.Message], opts ...types.Option) (*schema.StreamReader[*schema.StreamReader[types.TtsChunk]], error)
 }
 
 // GetTTSProvider 获取一个完整的TTS提供者（支持Context）
@@ -55,6 +62,126 @@ func GetTTSProvider(providerName string, config map[string]interface{}) (TTSProv
 // ContextTTSAdapter 是一个适配器，为基础TTS提供者添加Context支持
 type ContextTTSAdapter struct {
 	Provider BaseTTSProvider
+}
+
+func (p *ContextTTSAdapter) Invoke(ctx context.Context, text string, opts ...types.Option) ([][]byte, error) {
+	var baseOptions types.Options
+	options := types.GetImplSpecificOptions(&baseOptions, opts...)
+
+	// Invoke 方法是一次性调用，chunk 开始/结束回调
+	if options.TtsChunkStartCallback != nil {
+		options.TtsChunkStartCallback()
+	}
+	// 调用 TextToSpeechStream 方法获取 Opus 帧
+	opusFrames, err := p.TextToSpeech(ctx, text, options.SampleRate, options.Channel, options.FrameDuration)
+	if err != nil {
+		// 发生错误时也调用结束回调
+		if options.TtsChunkEndCallback != nil {
+			options.TtsChunkEndCallback()
+		}
+		return nil, fmt.Errorf("获取 Opus 帧失败: %v", err)
+	}
+	if options.TtsChunkEndCallback != nil {
+		options.TtsChunkEndCallback()
+	}
+
+	return opusFrames, nil
+}
+
+func (p *ContextTTSAdapter) Transform(ctx context.Context, input *schema.StreamReader[*schema.Message], opts ...types.Option) (*schema.StreamReader[*schema.StreamReader[types.TtsChunk]], error) {
+	var baseOptions types.Options
+	options := types.GetImplSpecificOptions(&baseOptions, opts...)
+
+	log.Debugf("TTS Transform options: %+v", options)
+
+	// 外层 StreamReader：每个句子返回一个独立的 StreamReader
+	sentenceStreamReader, sentenceStreamWriter := schema.Pipe[*schema.StreamReader[types.TtsChunk]](100)
+
+	go func() {
+		defer sentenceStreamWriter.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Debugf("TTS流式合成取消")
+				return
+			default:
+			}
+			message, err := input.Recv()
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				log.Errorf("读取输入流失败: %v", err)
+				return
+			}
+
+			log.Debugf("TTS Transform get message: %+v", message)
+
+			if options.TtsChunkStartCallback != nil {
+				options.TtsChunkStartCallback()
+			}
+
+			// 为每个句子创建一个独立的音频流 StreamReader
+			audioStreamReader, audioStreamWriter := schema.Pipe[types.TtsChunk](100)
+
+			// 将句子的音频流 StreamReader 发送到外层流（提前发送，让下游可以开始处理）
+			if closed := sentenceStreamWriter.Send(audioStreamReader, nil); closed {
+				log.Errorf("写入句子流失败: %v", err)
+				audioStreamWriter.Close()
+				return
+			}
+
+			// 在主循环中顺序生成该句子的音频流（顺序执行，不并发）
+			msgContent := message.Content
+
+			// 将句子开始的标记发送到音频流（包含文本信息）
+			startChunk := types.TtsChunk{
+				Text: msgContent,
+				Data: nil,
+			}
+			if closed := audioStreamWriter.Send(startChunk, nil); closed {
+				log.Errorf("写入句子开始标记失败")
+				audioStreamWriter.Close()
+				return
+			}
+
+			// 调用 TextToSpeechStream 方法获取 Opus 帧（顺序执行）
+			outputChan, err := p.TextToSpeechStream(ctx, msgContent, options.SampleRate, options.Channel, options.FrameDuration)
+			if err != nil {
+				log.Errorf("获取 Opus 帧失败: %v", err)
+				audioStreamWriter.Close()
+				return
+			}
+
+			// 后续音频帧只发送 Data，Text 为空以减少开销
+			for frame := range outputChan {
+				select {
+				case <-ctx.Done():
+					log.Debugf("TTS流式合成取消, 文本: %s", msgContent)
+					audioStreamWriter.Close()
+					return
+				default:
+				}
+				ttsChunk := types.TtsChunk{
+					Text: "", // 同一句子的后续音频帧不携带文本，减少开销
+					Data: frame,
+				}
+				if closed := audioStreamWriter.Send(ttsChunk, nil); closed {
+					log.Errorf("写入音频流失败: %v", err)
+					audioStreamWriter.Close()
+					return
+				}
+			}
+
+			audioStreamWriter.Close()
+
+			if options.TtsChunkEndCallback != nil {
+				options.TtsChunkEndCallback()
+			}
+		}
+	}()
+
+	return sentenceStreamReader, nil
 }
 
 // TextToSpeech 代理到原始提供者

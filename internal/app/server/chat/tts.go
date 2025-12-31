@@ -1,13 +1,18 @@
 package chat
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"time"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
 	llm_common "xiaozhi-esp32-server-golang/internal/domain/llm/common"
+	tts_types "xiaozhi-esp32-server-golang/internal/domain/tts/types"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 type TTSQueueItem struct {
@@ -212,4 +217,119 @@ func (t *TTSManager) SendTTSAudio(ctx context.Context, audioChan chan []byte, is
 			}
 		}
 	}
+}
+
+func (t *TTSManager) EinoTtsComponents(ctx context.Context, input *schema.StreamReader[*schema.StreamReader[tts_types.TtsChunk]]) (*schema.Message, error) {
+	var finalMsg schema.Message
+
+	var stringBuffer bytes.Buffer
+	isFirst := true
+	// 处理一个句子的音频流
+	processSentenceStream := func(sentenceStream *schema.StreamReader[tts_types.TtsChunk]) error {
+		var sentenceText string
+		audioChan := make(chan []byte, 100)
+
+		// 读取句子流的第一个 chunk（应该包含文本标记）
+		firstChunk, err := sentenceStream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				return nil // 空句子流，跳过
+			}
+			return fmt.Errorf("读取句子流失败: %v", err)
+		}
+
+		// 第一个 chunk 应该是句子开始标记，包含文本
+		if firstChunk.Text != "" {
+			sentenceText = firstChunk.Text
+		}
+
+		// 在 goroutine 中读取该句子的音频帧并发送到 channel
+		go func() {
+			defer close(audioChan)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				ttsChunk, err := sentenceStream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						return
+					}
+					log.Errorf("读取句子音频流失败: %v", err)
+					return
+				}
+
+				// 如果有音频数据，发送到通道
+				if len(ttsChunk.Data) > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case audioChan <- ttsChunk.Data:
+					}
+				}
+			}
+		}()
+
+		// 发送句子开始信号
+		if sentenceText != "" {
+			if err := t.serverTransport.SendSentenceStart(sentenceText); err != nil {
+				log.Errorf("发送 TTS 文本失败: %s, %v", sentenceText, err)
+				return err
+			}
+		}
+
+		// 发送该句子的所有音频帧（从 channel 中流式读取并发送）
+		if err := t.SendTTSAudio(ctx, audioChan, isFirst); err != nil {
+			log.Errorf("发送 TTS 音频失败: %v", err)
+			return err
+		}
+
+		isFirst = false
+
+		// 发送句子结束信号
+		if sentenceText != "" {
+			if err := t.serverTransport.SendSentenceEnd(sentenceText); err != nil {
+				log.Errorf("发送 TTS 文本失败: %s, %v", sentenceText, err)
+				return err
+			}
+		}
+
+		// 流式输出当前句子的消息
+		if sentenceText != "" {
+			stringBuffer.WriteString(sentenceText)
+		}
+
+		return nil
+	}
+
+	// 接收每个句子的音频流
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debugf("EinoTtsComponents context done, exit")
+			return &finalMsg, nil
+		default:
+		}
+
+		sentenceStream, err := input.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Errorf("接收句子流失败: %v", err)
+			return &finalMsg, err
+		}
+
+		// 处理当前句子的音频流
+		if err := processSentenceStream(sentenceStream); err != nil {
+			log.Errorf("处理句子音频流失败: %v", err)
+			return &finalMsg, err
+		}
+	}
+
+	finalMsg.Content = stringBuffer.String()
+
+	return &finalMsg, nil
 }

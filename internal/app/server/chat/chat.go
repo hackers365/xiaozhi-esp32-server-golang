@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/cloudwego/eino/schema"
 	"github.com/spf13/viper"
 
 	"xiaozhi-esp32-server-golang/constants"
@@ -93,6 +94,7 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 	if err != nil {
 		log.Errorf("检查设备激活状态失败: %v", err)
 	}
+	opusAudioBufferReader, opusAudioBufferWriter := schema.Pipe[[]byte](100)
 
 	clientState := &ClientState{
 		IsActivated:  isDeviceActivated,
@@ -111,7 +113,8 @@ func GenClientState(pctx context.Context, deviceID string) (*ClientState, error)
 			FrameDuration: types_audio.FrameDuration,
 			Format:        types_audio.Format,
 		},
-		OpusAudioBuffer: make(chan []byte, 100),
+		OpusAudioBufferWriter: opusAudioBufferWriter,
+		OpusAudioBufferReader: opusAudioBufferReader,
 		AsrAudioBuffer: &AsrAudioBuffer{
 			PcmData:          make([]float32, 0),
 			AudioBufferMutex: sync.RWMutex{},

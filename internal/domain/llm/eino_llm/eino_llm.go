@@ -11,12 +11,13 @@ import (
 	"sync"
 	"time"
 
+	. "xiaozhi-esp32-server-golang/internal/domain/llm/common"
+	log "xiaozhi-esp32-server-golang/logger"
+
 	"github.com/cloudwego/eino-ext/components/model/ollama"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-
-	log "xiaozhi-esp32-server-golang/logger"
 )
 
 // EinoLLMProvider 基于Eino框架的LLM提供者
@@ -215,18 +216,49 @@ func (p *EinoLLMProvider) GetModelInfo() map[string]interface{} {
 	}
 }
 
+func (p *EinoLLMProvider) WithTools(tools []*schema.ToolInfo) (LLMProvider, error) {
+	if len(tools) == 0 {
+		return p, nil
+	}
+	chatModel, err := p.chatModel.WithTools(tools)
+	if err != nil {
+		log.Errorf("WithTools failed: %v", err)
+		return nil, err
+	}
+	return &EinoLLMProvider{
+		chatModel:    chatModel,
+		modelName:    p.modelName,
+		maxTokens:    p.maxTokens,
+		streamable:   p.streamable,
+		config:       p.config,
+		providerType: p.providerType,
+	}, nil
+}
+
+func (p *EinoLLMProvider) Generate(ctx context.Context, dialogue []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	return p.chatModel.Generate(ctx, dialogue, model.WithMaxTokens(p.maxTokens))
+}
+
 // ResponseWithFunctions 带函数调用的响应，使用Eino原生工具类型，直接调用EinoResponseWithTools
-func (p *EinoLLMProvider) ResponseWithContext(ctx context.Context, sessionID string, dialogue []*schema.Message, functions []*schema.ToolInfo) chan *schema.Message {
+func (p *EinoLLMProvider) Stream(ctx context.Context, dialogue []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	var sessionID string
+	if v := ctx.Value("session_id"); v != nil {
+		sessionID = v.(string)
+	}
 
 	log.Infof("[Eino-LLM] 开始处理带工具的请求 - SessionID: %s, Type: %s", sessionID, p.providerType)
 
-	logMessages(dialogue)
+	//logMessages(dialogue)
 	// 直接调用EinoResponseWithTools获取Eino原生响应
-	einoResponseChan := p.EinoResponseWithTools(ctx, sessionID, dialogue, functions)
+	msgStreamReader, err := p.EinoResponseWithTools(ctx, sessionID, dialogue, opts...)
+	if err != nil {
+		log.Errorf("[Eino-LLM] 调用EinoResponseWithTools失败 - %v", err)
+		return nil, fmt.Errorf("调用EinoResponseWithTools失败 - %v", err)
+	}
 
 	log.Infof("[Eino-LLM] 工具调用请求处理完成 - SessionID: %s", sessionID)
 
-	return einoResponseChan
+	return msgStreamReader, err
 }
 
 func logMessages(messages []*schema.Message) {
@@ -240,128 +272,95 @@ func logMessages(messages []*schema.Message) {
 }
 
 // EinoResponseWithTools 直接使用Eino类型的带工具响应
-func (p *EinoLLMProvider) EinoResponseWithTools(ctx context.Context, sessionID string, messages []*schema.Message, tools []*schema.ToolInfo) chan *schema.Message {
-	responseChan := make(chan *schema.Message, 200)
+func (p *EinoLLMProvider) EinoResponseWithTools(ctx context.Context, sessionID string, messages []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	responseStreamReader, responseStreamWriter := schema.Pipe[*schema.Message](100)
 
-	var err error
 	go func() {
-		defer close(responseChan)
+		defer responseStreamWriter.Close()
 
-		log.Infof("[Eino-LLM] 开始处理Eino工具请求 - SessionID: %s, tools: %+v", sessionID, tools)
+		log.Infof("[Eino-LLM] 开始处理Eino工具请求 - SessionID: %s", sessionID)
 
-		// 如果有工具，需要绑定工具到ChatModel
-		if len(tools) > 0 {
-			p.chatModel, err = p.chatModel.WithTools(tools)
-			if err != nil {
-				log.Errorf("绑定工具失败: %v", err)
-				return
-			}
+		// 直接使用Eino的Stream方法
+		streamReader, err := p.chatModel.Stream(ctx, messages, model.WithMaxTokens(p.maxTokens))
+		if err != nil {
+			log.Errorf("Eino工具流式调用失败: %v", err)
+			return
 		}
 
-		if p.streamable {
-			log.Debugf("EinoLLMProvider.EinoResponseWithTools() streamable: %t", p.streamable)
-			// 直接使用Eino的Stream方法
-			streamReader, err := p.chatModel.Stream(ctx, messages, model.WithMaxTokens(p.maxTokens))
-			if err != nil {
-				log.Errorf("Eino工具流式调用失败: %v", err)
-				// 对于mock实现，如果Stream失败，回退到Generate
-				message, genErr := p.chatModel.Generate(ctx, messages, model.WithMaxTokens(p.maxTokens))
-				if genErr != nil {
-					log.Errorf("Eino工具生成响应失败: %v", genErr)
-					return
+		if streamReader != nil {
+			defer streamReader.Close()
+
+			var currentToolCall *schema.ToolCall
+			var toolCallBuffer string
+			var isToolCallComplete bool
+
+			// 处理流式响应
+			for {
+				message, err := streamReader.Recv()
+				log.Debugf("streamReader.Recv() message: %+v", message)
+				if err == io.EOF {
+					// 如果有未完成的工具调用，发送最后一次
+					if currentToolCall != nil {
+						completeMessage := &schema.Message{
+							Role:      schema.Assistant,
+							ToolCalls: []schema.ToolCall{*currentToolCall},
+						}
+						responseStreamWriter.Send(completeMessage, nil)
+					}
+					break
 				}
+				if err != nil {
+					log.Errorf("接收流式响应失败: %v", err)
+					break
+				}
+
 				if message != nil {
-					responseChan <- message
-				}
-				return
-			}
+					// 检查是否是工具调用的开始
+					if len(message.ToolCalls) > 0 {
+						toolCall := message.ToolCalls[0]
 
-			if streamReader != nil {
-				defer streamReader.Close()
+						if toolCall.Function.Name != "" {
+							// 新工具调用开始
+							currentToolCall = &toolCall
+							toolCallBuffer = toolCall.Function.Arguments
+							isToolCallComplete = false
+						} else if currentToolCall != nil {
+							// 累积工具调用参数
+							toolCallBuffer += toolCall.Function.Arguments
+							currentToolCall.Function.Arguments = toolCallBuffer
 
-				var currentToolCall *schema.ToolCall
-				var toolCallBuffer string
-				var isToolCallComplete bool
+							// 检查参数是否是完整的 JSON
+							if isValidJSON(toolCallBuffer) {
+								isToolCallComplete = true
+							}
+						}
 
-				// 处理流式响应
-				for {
-					message, err := streamReader.Recv()
-					log.Debugf("streamReader.Recv() message: %+v", message)
-					if err == io.EOF {
-						// 如果有未完成的工具调用，发送最后一次
-						if currentToolCall != nil {
+						// 如果工具调用完整，发送消息
+						if isToolCallComplete {
 							completeMessage := &schema.Message{
 								Role:      schema.Assistant,
 								ToolCalls: []schema.ToolCall{*currentToolCall},
 							}
-							responseChan <- completeMessage
+							responseStreamWriter.Send(completeMessage, nil)
+
+							// 重置状态
+							currentToolCall = nil
+							toolCallBuffer = ""
+							isToolCallComplete = false
 						}
-						break
-					}
-					if err != nil {
-						log.Errorf("接收流式响应失败: %v", err)
-						break
-					}
-
-					if message != nil {
-						// 检查是否是工具调用的开始
-						if len(message.ToolCalls) > 0 {
-							toolCall := message.ToolCalls[0]
-
-							if toolCall.Function.Name != "" {
-								// 新工具调用开始
-								currentToolCall = &toolCall
-								toolCallBuffer = toolCall.Function.Arguments
-								isToolCallComplete = false
-							} else if currentToolCall != nil {
-								// 累积工具调用参数
-								toolCallBuffer += toolCall.Function.Arguments
-								currentToolCall.Function.Arguments = toolCallBuffer
-
-								// 检查参数是否是完整的 JSON
-								if isValidJSON(toolCallBuffer) {
-									isToolCallComplete = true
-								}
-							}
-
-							// 如果工具调用完整，发送消息
-							if isToolCallComplete {
-								completeMessage := &schema.Message{
-									Role:      schema.Assistant,
-									ToolCalls: []schema.ToolCall{*currentToolCall},
-								}
-								responseChan <- completeMessage
-
-								// 重置状态
-								currentToolCall = nil
-								toolCallBuffer = ""
-								isToolCallComplete = false
-							}
-						} else if message.Content != "" {
-							// 发送非工具调用的普通消息
-							message.ToolCalls = nil
-							responseChan <- message
-						}
+					} else if message.Content != "" {
+						// 发送非工具调用的普通消息
+						message.ToolCalls = nil
+						responseStreamWriter.Send(message, nil)
 					}
 				}
-			}
-		} else {
-			// 直接使用Eino的Generate方法
-			message, err := p.chatModel.Generate(ctx, messages, model.WithMaxTokens(p.maxTokens))
-			if err != nil {
-				log.Errorf("Eino工具生成响应失败: %v", err)
-				return
-			}
-
-			if message != nil {
-				responseChan <- message
 			}
 		}
 
 		log.Infof("[Eino-LLM] Eino工具请求处理完成 - SessionID: %s", sessionID)
 	}()
 
-	return responseChan
+	return responseStreamReader, nil
 }
 
 // isValidJSON 检查字符串是否是有效的JSON

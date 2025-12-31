@@ -7,6 +7,8 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/asr/funasr"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // FunasrAdapter 适配 funasr 包到 asr 接口
@@ -87,12 +89,6 @@ func (a *FunasrAdapter) Process(pcmData []float32) (string, error) {
 }
 
 // StreamingRecognize 实现流式识别接口
-func (a *FunasrAdapter) StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error) {
-	// 调用funasr包的StreamingRecognize方法
-	resultChan, err := a.engine.StreamingRecognize(ctx, audioStream)
-	if err != nil {
-		return nil, err
-	}
-
-	return resultChan, nil
+func (a *FunasrAdapter) StreamingRecognize(ctx context.Context, audioStream *schema.StreamReader[[]float32]) (chan types.StreamingResult, error) {
+	return a.engine.StreamingRecognize(ctx, audioStream)
 }

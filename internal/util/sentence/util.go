@@ -1,4 +1,4 @@
-package llm
+package sentence
 
 import (
 	"regexp"
@@ -57,7 +57,7 @@ var (
 )
 
 // 使用快速的字符检查替代正则
-func isNumberPrefix(text []rune, pos int) bool {
+func IsNumberPrefix(text []rune, pos int) bool {
 	if pos <= 0 || text[pos] != '.' {
 		return false
 	}
@@ -91,7 +91,7 @@ func isNumberPrefix(text []rune, pos int) bool {
 }
 
 // 去除首尾空白字符
-func trimSpaceRunes(text []rune) []rune {
+func TrimSpaceRunes(text []rune) []rune {
 	start, end := 0, len(text)-1
 
 	for start <= end && (text[start] == ' ' || text[start] == '\t' || text[start] == '\n') {
@@ -108,14 +108,14 @@ func trimSpaceRunes(text []rune) []rune {
 	return text[start : end+1]
 }
 
-func findLastPunctuation(text []rune, separatorMap map[rune]bool) int {
+func FindLastPunctuation(text []rune, separatorMap map[rune]bool) int {
 	// 从后向前查找最后一个标点
 	lastPos := -1
 	for i := len(text) - 1; i >= 0; i-- {
 		// 检查是否是标点符号
 		if separatorMap[text[i]] {
 			// 如果是点号，检查是否是序号的一部分
-			if text[i] == '.' && isNumberPrefix(text, i) {
+			if text[i] == '.' && IsNumberPrefix(text, i) {
 				continue
 			}
 			return i
@@ -124,7 +124,7 @@ func findLastPunctuation(text []rune, separatorMap map[rune]bool) int {
 	return lastPos
 }
 
-func findNextSplitPoint(text []rune, startPos int, maxLen int, separatorMap map[rune]bool) int {
+func FindNextSplitPoint(text []rune, startPos int, maxLen int, separatorMap map[rune]bool) int {
 	// 计算查找的结束位置
 	endPos := startPos + maxLen
 	if endPos > len(text) {
@@ -165,7 +165,7 @@ func findNextSplitPoint(text []rune, startPos int, maxLen int, separatorMap map[
 	return -1
 }
 
-func extractSmartSentences(text string, minLen, maxLen int, isFirst bool) (sentences []string, remaining string) {
+func ExtractSmartSentences(text string, minLen, maxLen int, isFirst bool) (sentences []string, remaining string) {
 	//当isFirst为true时, 放宽到逗号作为分隔符
 	separatorMap := punctuationMap
 	if isFirst {
@@ -203,10 +203,10 @@ func extractSmartSentences(text string, minLen, maxLen int, isFirst bool) (sente
 		}
 
 		// 查找下一个分割点
-		splitPos := findNextSplitPoint(currentRunes, startPos, maxLen, separatorMap)
+		splitPos := FindNextSplitPoint(currentRunes, startPos, maxLen, separatorMap)
 		if splitPos == -1 {
 			// 没有找到分割点，将剩余文本作为remaining
-			segment := trimSpaceRunes(currentRunes[startPos:])
+			segment := TrimSpaceRunes(currentRunes[startPos:])
 			if len(segment) > 0 {
 				remaining = string(segment)
 			}
@@ -218,7 +218,7 @@ func extractSmartSentences(text string, minLen, maxLen int, isFirst bool) (sente
 		tempRunes = tempRunes[:0]
 
 		// 收集并处理当前段落
-		segment := trimSpaceRunes(currentRunes[startPos : splitPos+1])
+		segment := TrimSpaceRunes(currentRunes[startPos : splitPos+1])
 
 		// 检查段落是否满足最小长度要求且以标点符号结尾
 		if len(segment) >= minLen && separatorMap[segment[len(segment)-1]] {
@@ -240,7 +240,7 @@ func extractSmartSentences(text string, minLen, maxLen int, isFirst bool) (sente
 }
 
 // 判断字符串中是否包含分隔符（句子结束或暂停标点符号）
-func containsSentenceSeparator(s string, isFirst bool) bool {
+func ContainsSentenceSeparator(s string, isFirst bool) bool {
 	for _, r := range s {
 		if isFirst {
 			if firstPunctuation[r] {

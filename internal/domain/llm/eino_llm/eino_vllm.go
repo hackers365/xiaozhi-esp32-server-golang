@@ -1,7 +1,6 @@
 package eino_llm
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -40,27 +39,11 @@ func (p *EinoLLMProvider) ResponseWithVllm(ctx context.Context, file []byte, tex
 		},
 		msg,
 	}
-	responseChan := p.ResponseWithContext(ctx, "", dialogue, []*schema.ToolInfo{})
-	if responseChan == nil {
-		log.Errorf("[Eino-VLLM] 调用视觉api请求处理失败 - responseChan为nil")
-		return "", fmt.Errorf("调用视觉api请求处理失败 - responseChan为nil")
+	outputMsg, err := p.Generate(ctx, dialogue)
+	if err != nil {
+		log.Errorf("[Eino-VLLM] 调用视觉api请求处理失败 - %v", err)
+		return "", fmt.Errorf("调用视觉api请求处理失败 - %v", err)
 	}
 
-	var result bytes.Buffer
-	for {
-		select {
-		case <-ctx.Done():
-			log.Errorf("[Eino-VLLM]  context done")
-			return "", nil
-		case response, ok := <-responseChan:
-			if !ok {
-				if response != nil && response.Content != "" {
-					result.WriteString(response.Content)
-				}
-				responseText := result.String()
-				return responseText, nil
-			}
-			result.WriteString(response.Content)
-		}
-	}
+	return outputMsg.Content, nil
 }

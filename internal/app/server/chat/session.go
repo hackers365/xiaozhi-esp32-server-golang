@@ -10,8 +10,12 @@ import (
 	"time"
 
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"github.com/spf13/viper"
+
+	"xiaozhi-esp32-server-golang/internal/data/eino"
+	vad_types "xiaozhi-esp32-server-golang/internal/data/vad"
 
 	"xiaozhi-esp32-server-golang/internal/app/server/auth"
 	types_conn "xiaozhi-esp32-server-golang/internal/app/server/types"
@@ -224,13 +228,12 @@ func (c *ChatSession) HandleTextMessage(message []byte) error {
 
 // HandleAudioMessage 处理音频消息
 func (c *ChatSession) HandleAudioMessage(data []byte) bool {
-	select {
-	case c.clientState.OpusAudioBuffer <- data:
-		return true
-	default:
-		log.Warnf("音频缓冲区已满, 丢弃音频数据")
+	closed := c.clientState.OpusAudioBufferWriter.Send(data, nil)
+	if closed {
+		log.Errorf("opus audio buffer writer is closed, drop audio data")
+		return false
 	}
-	return false
+	return true
 }
 
 // handleHelloMessage 处理 hello 消息
@@ -299,7 +302,8 @@ func (s *ChatSession) HandleCommonHelloMessage(msg *ClientMessage) error {
 	clientState.InputAudioFormat = *msg.AudioParams
 	clientState.SetAsrPcmFrameSize(clientState.InputAudioFormat.SampleRate, clientState.InputAudioFormat.Channels, clientState.InputAudioFormat.FrameDuration)
 
-	s.asrManager.ProcessVadAudio(clientState.Ctx, s.Close)
+	//start vad audio process
+	//s.asrManager.ProcessVadAudio(s.ctx, s.clientState.OpusAudioBufferReader, vad_types.WithOnClose(s.Close))
 
 	return nil
 }
@@ -554,123 +558,189 @@ func (s *ChatSession) OnListenStart() error {
 	s.clientState.Destroy()
 
 	ctx := s.clientState.SessionCtx.Get(s.clientState.Ctx)
+	_ = ctx
 
 	//初始化asr相关
 	if s.clientState.ListenMode == "manual" {
 		s.clientState.VoiceStatus.SetClientHaveVoice(true)
 	}
 
-	// 启动asr流式识别，复用 restartAsrRecognition 函数
-	err := s.asrManager.RestartAsrRecognition(ctx)
+	//在这里开始eino编排
+	err := s.RunVadAsrGraph(ctx)
 	if err != nil {
-		log.Errorf("asr流式识别失败: %v", err)
-		s.Close()
+		log.Errorf("执行VAD+ASR graph失败: %v", err)
 		return err
 	}
 
+	return nil
+}
+
+// CreateVadAsrGraph 创建VAD+ASR的eino graph
+func (s *ChatSession) CreateVadAsrGraph(ctx context.Context) (compose.Runnable[[]byte, string], error) {
+	// 创建图，输入是 []byte（opus音频），输出是 string（ASR识别结果）
+	// 注意：Graph 的类型参数应该是非流式类型，使用 Collect 方法时传入流式输入
+	graph := compose.NewGraph[[]byte, string]()
+
+	// 创建VAD节点：将 opus 音频转换为 PCM 音频
+	// 需要将非流式输入转换为流式输入，然后调用 ProcessVadAudio
+	vadNode := compose.TransformableLambda(func(ctx context.Context, input *schema.StreamReader[[]byte]) (*schema.StreamReader[[]float32], error) {
+		return s.asrManager.ProcessVadAudio(ctx, input, vad_types.WithOnClose(s.Close))
+	})
+
+	// 创建ASR节点：将 PCM 音频转换为文本
+	// 使用 CollectableLambda 因为 EinoAsrComponent 返回非流式的 string
+	asrNode := compose.CollectableLambda(s.EinoAsrComponent)
+
+	// 添加节点到图
+	_ = graph.AddLambdaNode(eino.NodeVAD, vadNode, compose.WithNodeName(eino.NodeVAD))
+	_ = graph.AddLambdaNode(eino.NodeASR, asrNode, compose.WithNodeName(eino.NodeASR))
+
+	// 构建边关系：START -> VAD -> ASR -> END
+	// 注意：START 节点输出 []byte，但 VAD 节点需要 *schema.StreamReader[[]byte]
+	// eino 框架会自动处理这种转换
+	_ = graph.AddEdge(compose.START, eino.NodeVAD)
+	_ = graph.AddEdge(eino.NodeVAD, eino.NodeASR)
+	_ = graph.AddEdge(eino.NodeASR, compose.END)
+
+	// 编译图
+	r, err := graph.Compile(ctx)
+	if err != nil {
+		log.Errorf("编译VAD+ASR Graph失败: %v", err)
+		return nil, err
+	}
+
+	return r, nil
+}
+
+// RunVadAsrGraph 执行VAD+ASR的eino graph
+func (s *ChatSession) RunVadAsrGraph(ctx context.Context) error {
+	g, err := s.CreateVadAsrGraph(ctx)
+	if err != nil {
+		log.Errorf("创建VAD+ASR Graph失败: %v", err)
+		return err
+	}
+
+	// 执行图，输入是 OpusAudioBufferReader，使用 Collect 方法处理流式输入并返回非流式输出
+	// Collect 是阻塞的，会一直等待直到流结束并返回最终结果
+	text, err := g.Collect(ctx, s.clientState.OpusAudioBufferReader)
+	if err != nil {
+		log.Errorf("执行VAD+ASR Graph失败: %v", err)
+		return err
+	}
+	if text != "" {
+		log.Debugf("VAD+ASR Graph识别结果: %s", text)
+	}
+
+	return nil
+}
+
+func (s *ChatSession) EinoAsrComponent(ctx context.Context, audioStream *schema.StreamReader[[]float32]) (string, error) {
+
+	// 启动asr流式识别，复用 restartAsrRecognition 函数
+	err := s.asrManager.RestartAsrRecognition(ctx, audioStream)
+	if err != nil {
+		log.Errorf("asr流式识别失败: %v", err)
+		s.Close()
+		return "", err
+	}
+
 	// 启动一个goroutine处理asr结果
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Errorf("asr结果处理goroutine panic: %v, stack: %s", r, string(debug.Stack()))
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("asr结果处理goroutine panic: %v, stack: %s", r, string(debug.Stack()))
+		}
+	}()
+
+	//最大空闲 60s
+	var startIdleTime, maxIdleTime int64
+	startIdleTime = time.Now().Unix()
+	maxIdleTime = 60
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Debugf("asr ctx done")
+			return "", nil
+		default:
+		}
+
+		text, isRetry, err := s.clientState.RetireAsrResult(ctx)
+		if err != nil {
+			log.Errorf("处理asr结果失败: %v", err)
+			s.Close()
+			return "", err
+		}
+		if !isRetry {
+			log.Debugf("asrResult is not retry, return")
+			return "", nil
+		}
+
+		//统计asr耗时
+		log.Debugf("处理asr结果: %s, 耗时: %d ms", text, s.clientState.GetAsrDuration())
+
+		if text != "" {
+			//如果是realtime模式下，需要停止 当前的llm和tts
+			if s.clientState.IsRealTime() && viper.GetInt("chat.realtime_mode") == 2 {
+				s.clientState.AfterAsrSessionCtx.Cancel()
 			}
-		}()
+			// 重置重试计数器
+			startIdleTime = time.Now().Unix()
 
-		//最大空闲 60s
+			//当获取到asr结果时, 结束语音输入
+			s.clientState.OnVoiceSilence()
 
-		var startIdleTime, maxIdleTime int64
-		startIdleTime = time.Now().Unix()
-		maxIdleTime = 60
+			//发送asr消息
+			err = s.serverTransport.SendAsrResult(text)
+			if err != nil {
+				log.Errorf("发送asr消息失败: %v", err)
+				s.Close()
+				return "", err
+			}
 
-		for {
+			err = s.AddAsrResultToQueue(text)
+			if err != nil {
+				log.Errorf("开始对话失败: %v", err)
+				s.Close()
+				return "", err
+			}
+			if s.clientState.IsRealTime() {
+				if restartErr := s.asrManager.RestartAsrRecognition(ctx, audioStream); restartErr != nil {
+					log.Errorf("重启ASR识别失败: %v", restartErr)
+					s.Close()
+					return "", restartErr
+				}
+				//realtime模式下, 继续重启asr识别
+				continue
+			}
+			return text, nil
+		} else {
 			select {
 			case <-ctx.Done():
 				log.Debugf("asr ctx done")
-				return
+				return "", nil
 			default:
 			}
-
-			text, isRetry, err := s.clientState.RetireAsrResult(ctx)
-			if err != nil {
-				log.Errorf("处理asr结果失败: %v", err)
-				s.Close()
-				return
-			}
-			if !isRetry {
-				log.Debugf("asrResult is not retry, return")
-				return
-			}
-
-			//统计asr耗时
-			log.Debugf("处理asr结果: %s, 耗时: %d ms", text, s.clientState.GetAsrDuration())
-
-			if text != "" {
-				//如果是realtime模式下，需要停止 当前的llm和tts
-				if s.clientState.IsRealTime() && viper.GetInt("chat.realtime_mode") == 2 {
-					s.clientState.AfterAsrSessionCtx.Cancel()
-				}
-
-				// 重置重试计数器
-				startIdleTime = time.Now().Unix()
-
-				//当获取到asr结果时, 结束语音输入
-				s.clientState.OnVoiceSilence()
-
-				//发送asr消息
-				err = s.serverTransport.SendAsrResult(text)
-				if err != nil {
-					log.Errorf("发送asr消息失败: %v", err)
-					s.Close()
-					return
-				}
-
-				err = s.AddAsrResultToQueue(text)
-				if err != nil {
-					log.Errorf("开始对话失败: %v", err)
-					s.Close()
-					return
-				}
-
-				if s.clientState.IsRealTime() {
-					if restartErr := s.asrManager.RestartAsrRecognition(ctx); restartErr != nil {
+			log.Debugf("ready Restart Asr, s.clientState.Status: %s", s.clientState.Status)
+			if s.clientState.Status == ClientStatusListening || s.clientState.Status == ClientStatusListenStop {
+				// text 为空，检查是否需要重新启动ASR
+				diffTs := time.Now().Unix() - startIdleTime
+				if startIdleTime > 0 && diffTs <= maxIdleTime {
+					log.Warnf("ASR识别结果为空，尝试重启ASR识别, diff ts: %s", diffTs)
+					if restartErr := s.asrManager.RestartAsrRecognition(ctx, audioStream); restartErr != nil {
 						log.Errorf("重启ASR识别失败: %v", restartErr)
 						s.Close()
-						return
+						return "", restartErr
 					}
-					//realtime模式下, 继续重启asr识别
 					continue
-				}
-				return
-			} else {
-				select {
-				case <-ctx.Done():
-					log.Debugf("asr ctx done")
-					return
-				default:
-				}
-				log.Debugf("ready Restart Asr, s.clientState.Status: %s", s.clientState.Status)
-				if s.clientState.Status == ClientStatusListening || s.clientState.Status == ClientStatusListenStop {
-					// text 为空，检查是否需要重新启动ASR
-					diffTs := time.Now().Unix() - startIdleTime
-					if startIdleTime > 0 && diffTs <= maxIdleTime {
-						log.Warnf("ASR识别结果为空，尝试重启ASR识别, diff ts: %s", diffTs)
-						if restartErr := s.asrManager.RestartAsrRecognition(ctx); restartErr != nil {
-							log.Errorf("重启ASR识别失败: %v", restartErr)
-							s.Close()
-							return
-						}
-						continue
-					} else {
-						log.Warnf("ASR识别结果为空，已达到最大空闲时间: %d", maxIdleTime)
-						s.Close()
-						return
-					}
+				} else {
+					log.Warnf("ASR识别结果为空，已达到最大空闲时间: %d", maxIdleTime)
+					s.Close()
+					return "", nil
 				}
 			}
-			return
 		}
-	}()
-	return nil
+		return "", nil
+	}
 }
 
 // startChat 开始对话
@@ -701,7 +771,8 @@ func (s *ChatSession) processChatText(ctx context.Context) {
 			continue
 		}
 
-		err = s.actionDoChat(item.ctx, item.text)
+		//err = s.actionDoChat(item.ctx, item.text)
+		err = s.RunEinoGraph(item.ctx, item.text)
 		if err != nil {
 			log.Errorf("处理对话失败: %v", err)
 			continue

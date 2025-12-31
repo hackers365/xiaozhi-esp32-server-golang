@@ -25,7 +25,8 @@ func TestTextToSpeechStream(t *testing.T) {
 	t.Run("测试正常流式回调", func(t *testing.T) {
 
 		// 直接调用实际的API
-		outputOpusChan, err := provider.TextToSpeechStream(context.Background(), "这是一个测试文本，今天天气怎么样, 今天天气真好, 你是中国人, 咱们去北京天津玩好不好, 北京有什么好玩的，天津之眼吧")
+		// 使用标准音频参数：sampleRate=16000, channels=1, frameDuration=20
+		outputOpusChan, err := provider.TextToSpeechStream(context.Background(), "这是一个测试文本，今天天气怎么样, 今天天气真好, 你是中国人, 咱们去北京天津玩好不好, 北京有什么好玩的，天津之眼吧", 16000, 1, 20)
 		if err != nil {
 			t.Fatalf("TextToSpeechStream返回错误: %v", err)
 		}
