@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -446,10 +447,15 @@ func init() {
 	)
 
 	// 注册 TTS 资源类型
+	// 资源池 key 可能为 "provider" 或 "provider:voiceID"，GetTTSProvider 只识别 provider 名，需从 key 中解析
 	RegisterResourceType[tts.TTSProvider](
 		"tts",
 		func(rt, p string, cfg map[string]interface{}) (tts.TTSProvider, error) {
-			return tts.GetTTSProvider(p, cfg)
+			providerName := p
+			if idx := strings.Index(p, ":"); idx > 0 {
+				providerName = p[:idx]
+			}
+			return tts.GetTTSProvider(providerName, cfg)
 		},
 		WithIsValidFunc(func(p interface{}) bool {
 			if ttsProvider, ok := p.(tts.TTSProvider); ok && ttsProvider != nil {

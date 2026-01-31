@@ -70,6 +70,7 @@
           <el-select v-model="form.provider" placeholder="请选择提供商" style="width: 100%" @change="onProviderChange">
             <el-option label="FunASR" value="funasr" />
             <el-option label="豆包" value="doubao" />
+            <el-option label="Microsoft ASR" value="microsoft" />
           </el-select>
         </el-form-item>
         
@@ -200,6 +201,30 @@
             <el-input-number v-model="form.doubao.timeout" :min="1" style="width: 100%" />
           </el-form-item>
         </div>
+
+        <!-- Microsoft ASR配置字段 -->
+        <div v-if="form.provider === 'microsoft'">
+          <el-form-item label="订阅密钥" prop="microsoft.subscription_key">
+            <el-input v-model="form.microsoft.subscription_key" placeholder="请输入Azure订阅密钥" type="password" show-password />
+          </el-form-item>
+          
+          <el-form-item label="服务区域" prop="microsoft.region">
+            <el-input v-model="form.microsoft.region" placeholder="请输入服务区域（如：eastasia, koreacentral）" />
+          </el-form-item>
+          
+          <el-form-item label="识别语言" prop="microsoft.language">
+            <el-input v-model="form.microsoft.language" placeholder="请输入语言代码（如：zh-CN）" />
+          </el-form-item>
+          
+          <el-form-item label="超时时间(秒)" prop="microsoft.timeout">
+            <el-input-number v-model="form.microsoft.timeout" :min="1" :max="300" style="width: 100%" />
+          </el-form-item>
+          
+          <div class="form-tip">
+            <el-icon><InfoFilled /></el-icon>
+            采样率固定为 16kHz，仅支持流式识别模式
+          </div>
+        </div>
       </el-form>
       
       <template #footer>
@@ -253,6 +278,12 @@ const form = reactive({
     enable_ddc: false,
     chunk_duration: 200,
     timeout: 30
+  },
+  microsoft: {
+    subscription_key: '',
+    region: 'eastasia',
+    language: 'zh-CN',
+    timeout: 60
   }
 })
 
@@ -262,6 +293,8 @@ const generateConfig = () => {
     return JSON.stringify(form.funasr)
   } else if (form.provider === 'doubao') {
     return JSON.stringify(form.doubao)
+  } else if (form.provider === 'microsoft') {
+    return JSON.stringify(form.microsoft)
   }
   return '{}'
 }
@@ -283,7 +316,11 @@ const rules = {
   'doubao.ws_url': [{ required: true, message: '请输入WebSocket URL', trigger: 'blur' }],
   'doubao.model_name': [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
   'doubao.end_window_size': [{ required: true, message: '请输入结束窗口大小', trigger: 'blur' }],
-  'doubao.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
+  'doubao.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }],
+  // Microsoft ASR 验证规则
+  'microsoft.subscription_key': [{ required: true, message: '请输入订阅密钥', trigger: 'blur' }],
+  'microsoft.region': [{ required: true, message: '请输入服务区域', trigger: 'blur' }],
+  'microsoft.language': [{ required: true, message: '请输入识别语言', trigger: 'blur' }]
 }
 
 const loadConfigs = async () => {
@@ -337,6 +374,9 @@ const editConfig = (config) => {
     } else if (config.provider === 'doubao' && (configObj.appid || configObj.access_token)) {
       // 新格式：直接包含配置内容
       form.doubao = { ...form.doubao, ...configObj }
+    } else if (config.provider === 'microsoft' && (configObj.subscription_key || configObj.region)) {
+      // Microsoft ASR 配置
+      form.microsoft = { ...form.microsoft, ...configObj }
     }
   } catch (error) {
     console.error('解析配置JSON失败:', error)
@@ -481,6 +521,12 @@ const resetForm = () => {
     enable_ddc: false,
     chunk_duration: 200,
     timeout: 30
+  }
+  form.microsoft = {
+    subscription_key: '',
+    region: 'eastasia',
+    language: 'zh-CN',
+    timeout: 60
   }
 }
 

@@ -3,6 +3,7 @@ module xiaozhi-esp32-server-golang
 go 1.24.4
 
 require (
+	github.com/Microsoft/cognitive-services-speech-sdk-go v1.43.0
 	github.com/ThinkInAIXYZ/go-mcp v0.2.19
 	github.com/antonfisher/nested-logrus-formatter v1.3.1
 	github.com/asaskevich/EventBus v0.0.0-20200907212545-49d423059eef
@@ -28,13 +29,13 @@ require (
 	github.com/memodb-io/memobase/src/client/memobase-go v0.0.0-20251008012534-936f45328453
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/orcaman/concurrent-map/v2 v2.0.1
-	github.com/panjf2000/ants/v2 v2.11.4
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/scroot/music-sd v0.0.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.20.1
 	github.com/streamer45/silero-vad-go v0.2.1
 	github.com/stretchr/testify v1.10.0
+	github.com/tmaxmax/go-sse v0.11.0
 	go.uber.org/zap v1.27.0
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 )
@@ -85,7 +86,6 @@ require (
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
-	github.com/tmaxmax/go-sse v0.11.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yargevad/filepathx v1.0.0 // indirect

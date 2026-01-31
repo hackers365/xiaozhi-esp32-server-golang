@@ -6,6 +6,7 @@ import (
 
 	"xiaozhi-esp32-server-golang/constants"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/doubao"
+	"xiaozhi-esp32-server-golang/internal/domain/asr/microsoft"
 	"xiaozhi-esp32-server-golang/internal/domain/asr/types"
 	log "xiaozhi-esp32-server-golang/logger"
 )
@@ -46,7 +47,16 @@ func NewAsrProvider(asrType string, config map[string]interface{}) (AsrProvider,
 			log.Info("豆包ASR适配器创建成功")
 		}
 		return provider, err
+	case constants.AsrTypeMicrosoft:
+		log.Info("使用 Microsoft ASR 提供者")
+		provider, err := microsoft.NewMicrosoftASRProvider(config)
+		if err != nil {
+			log.Errorf("Microsoft ASR 提供者创建失败: %v", err)
+		} else {
+			log.Info("Microsoft ASR 提供者创建成功")
+		}
+		return provider, err
 	default:
-		return nil, fmt.Errorf("不支持的ASR引擎类型: %s，目前仅支持 'funasr'", asrType)
+		return nil, fmt.Errorf("不支持的ASR引擎类型: %s，目前仅支持 'funasr', 'doubao', 'microsoft'", asrType)
 	}
 }

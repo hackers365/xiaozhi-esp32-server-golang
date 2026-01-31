@@ -144,6 +144,7 @@ func (t *TTSManager) getTTSProviderInstance() (*pool.ResourceWrapper[tts.TTSProv
 	// 提取音色ID用于组合资源池key
 	voiceID := extractVoiceID(ttsConfig)
 
+	log.Debugf("getTTSProviderInstance, ttsProvider: %s, voiceID: %s", ttsProvider, voiceID)
 	// 组合资源池key：provider:voiceID（如果有音色ID）
 	poolKey := ttsProvider
 	if voiceID != "" {

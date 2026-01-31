@@ -73,6 +73,8 @@
             <el-option label="豆包 WebSocket" value="doubao_ws" />
             <el-option label="Edge TTS" value="edge" />
             <el-option label="Edge 离线" value="edge_offline" />
+            <el-option label="小智 TTS" value="xiaozhi" />
+            <el-option label="Microsoft TTS" value="microsoft" />
             <el-option label="OpenAI" value="openai" />
             <el-option label="千问" value="aliyun_qwen" />
             <el-option label="智谱" value="zhipu" />
@@ -437,6 +439,41 @@
             <el-input-number v-model="form.openai.frame_duration" :min="1" :max="1000" style="width: 100%" placeholder="毫秒" />
           </el-form-item>
         </template>
+
+        <!-- 小智 TTS 配置 -->
+        <template v-if="form.provider === 'xiaozhi'">
+          <el-form-item label="服务器地址" prop="xiaozhi.server_addr">
+            <el-input v-model="form.xiaozhi.server_addr" placeholder="请输入服务器地址（如：wss://api.tenclass.net/xiaozhi/v1/）" />
+          </el-form-item>
+          <el-form-item label="设备ID" prop="xiaozhi.device_id">
+            <el-input v-model="form.xiaozhi.device_id" placeholder="请输入设备ID" />
+          </el-form-item>
+          <el-form-item label="客户端ID" prop="xiaozhi.client_id">
+            <el-input v-model="form.xiaozhi.client_id" placeholder="请输入客户端ID" />
+          </el-form-item>
+          <el-form-item label="令牌" prop="xiaozhi.token">
+            <el-input v-model="form.xiaozhi.token" placeholder="请输入令牌" type="password" show-password />
+          </el-form-item>
+        </template>
+
+        <!-- Microsoft TTS 配置 -->
+        <template v-if="form.provider === 'microsoft'">
+          <el-form-item label="订阅密钥" prop="microsoft.subscription_key">
+            <el-input v-model="form.microsoft.subscription_key" placeholder="请输入Azure订阅密钥" type="password" show-password />
+          </el-form-item>
+          <el-form-item label="服务区域" prop="microsoft.region">
+            <el-input v-model="form.microsoft.region" placeholder="请输入服务区域（如：eastasia, koreacentral）" />
+          </el-form-item>
+          <el-form-item label="语音名称" prop="microsoft.voice">
+            <el-input v-model="form.microsoft.voice" placeholder="请输入语音名称（如：zh-CN-XiaoxiaoNeural）" />
+          </el-form-item>
+          <el-form-item label="语言代码" prop="microsoft.language">
+            <el-input v-model="form.microsoft.language" placeholder="请输入语言代码（如：zh-CN）" />
+          </el-form-item>
+          <el-form-item label="超时时间（秒）" prop="microsoft.timeout">
+            <el-input-number v-model="form.microsoft.timeout" :min="1" :max="300" style="width: 100%" />
+          </el-form-item>
+        </template>
       </el-form>
       
       <template #footer>
@@ -520,6 +557,19 @@ const form = reactive({
     sample_rate: 16000,
     channels: 1,
     frame_duration: 20
+  },
+  xiaozhi: {
+    server_addr: 'wss://api.tenclass.net/xiaozhi/v1/',
+    device_id: 'ba:8f:17:de:94:94',
+    client_id: 'e4b0c442-98fc-4e1b-8c3d-6a5b6a5b6a6d',
+    token: 'test-token'
+  },
+  microsoft: {
+    subscription_key: '',
+    region: 'eastasia',
+    voice: 'zh-CN-XiaoxiaoNeural',
+    language: 'zh-CN',
+    timeout: 60
   },
   openai: {
     api_key: '',
@@ -649,6 +699,19 @@ const generateConfig = () => {
       config.format = form.minimax.format || 'mp3'
       config.channel = form.minimax.channel || 1
       break
+    case 'xiaozhi':
+      config.server_addr = form.xiaozhi.server_addr
+      config.device_id = form.xiaozhi.device_id
+      config.client_id = form.xiaozhi.client_id
+      config.token = form.xiaozhi.token
+      break
+    case 'microsoft':
+      config.subscription_key = form.microsoft.subscription_key
+      config.region = form.microsoft.region
+      config.voice = form.microsoft.voice
+      config.language = form.microsoft.language
+      config.timeout = form.microsoft.timeout
+      break
   }
   
   return JSON.stringify(config)
@@ -679,6 +742,16 @@ const rules = {
   'edge.volume': [{ required: true, message: '请输入音量', trigger: 'blur' }],
   // Edge 离线验证规则
   'edge_offline.server_url': [{ required: true, message: '请输入服务器URL', trigger: 'blur' }],
+  // 小智 TTS 验证规则
+  'xiaozhi.server_addr': [{ required: true, message: '请输入服务器地址', trigger: 'blur' }],
+  'xiaozhi.device_id': [{ required: true, message: '请输入设备ID', trigger: 'blur' }],
+  'xiaozhi.client_id': [{ required: true, message: '请输入客户端ID', trigger: 'blur' }],
+  'xiaozhi.token': [{ required: true, message: '请输入令牌', trigger: 'blur' }],
+  // Microsoft TTS 验证规则
+  'microsoft.subscription_key': [{ required: true, message: '请输入订阅密钥', trigger: 'blur' }],
+  'microsoft.region': [{ required: true, message: '请输入服务区域', trigger: 'blur' }],
+  'microsoft.voice': [{ required: true, message: '请输入语音名称', trigger: 'blur' }],
+  'microsoft.language': [{ required: true, message: '请输入语言代码', trigger: 'blur' }],
   // OpenAI TTS 验证规则
   'openai.api_key': [{ required: true, message: '请输入API Key', trigger: 'blur' }],
   // 智谱 TTS 验证规则
@@ -800,6 +873,19 @@ const editConfig = (config) => {
         form.minimax.bitrate = configData.bitrate || 128000
         form.minimax.format = configData.format || 'mp3'
         form.minimax.channel = configData.channel || 1
+        break
+      case 'xiaozhi':
+        form.xiaozhi.server_addr = configData.server_addr || ''
+        form.xiaozhi.device_id = configData.device_id || ''
+        form.xiaozhi.client_id = configData.client_id || ''
+        form.xiaozhi.token = configData.token || ''
+        break
+      case 'microsoft':
+        form.microsoft.subscription_key = configData.subscription_key || ''
+        form.microsoft.region = configData.region || 'eastasia'
+        form.microsoft.voice = configData.voice || 'zh-CN-XiaoxiaoNeural'
+        form.microsoft.language = configData.language || 'zh-CN'
+        form.microsoft.timeout = configData.timeout || 60
         break
     }
   } catch (error) {
@@ -966,6 +1052,19 @@ const resetForm = () => {
       channels: 1,
       frame_duration: 20
     },
+    xiaozhi: {
+      server_addr: 'wss://api.tenclass.net/xiaozhi/v1/',
+      device_id: 'ba:8f:17:de:94:94',
+      client_id: 'e4b0c442-98fc-4e1b-8c3d-6a5b6a5b6a6d',
+      token: 'test-token'
+    },
+    microsoft: {
+      subscription_key: '',
+      region: 'eastasia',
+      voice: 'zh-CN-XiaoxiaoNeural',
+      language: 'zh-CN',
+      timeout: 60
+    },
     openai: {
       api_key: '',
       api_url: 'https://api.openai.com/v1/audio/speech',
@@ -985,6 +1084,7 @@ const resetForm = () => {
       speed: 1.0,
       volume: 1.0,
       stream: true,
+      encode_format: 'base64',
       frame_duration: 60
     },
     minimax: {
