@@ -783,9 +783,10 @@ func (ac *AdminController) getSystemConfigsData() (gin.H, error) {
 		}
 	}
 
-	// 处理 voice_identify 配置（与控制台配置结构一致，包含 base_url、threshold、enable）
-	// 业务启用由 json_data 中的 enable 表示；DB 的 enabled 列仅作列表项开关，不覆盖业务 enable
-	baseURL := os.Getenv("SPEAKER_SERVICE_URL")
+	// 处理 voice_identify 配置（系统运行时配置）
+	// 业务启用由 json_data.enable 表示；DB 的 enabled 列仅作列表项开关，不覆盖业务 enable
+	baseURL := strings.TrimSpace(os.Getenv("SPEAKER_SERVICE_URL"))
+	serviceMode := strings.ToLower(strings.TrimSpace(os.Getenv("SPEAKER_SERVICE_MODE")))
 	enabled := true  // 默认启用
 	threshold := 0.4 // 默认阈值
 
@@ -800,26 +801,57 @@ func (ac *AdminController) getSystemConfigsData() (gin.H, error) {
 						enabled = b
 					}
 				}
-				if service, ok := configData["service"].(map[string]interface{}); ok {
-					if url, ok := service["base_url"].(string); ok && url != "" && baseURL == "" {
-						baseURL = url
+
+				if baseURL == "" {
+					if urlVal, ok := configData["base_url"].(string); ok {
+						urlVal = strings.TrimSpace(urlVal)
+						if urlVal != "" {
+							baseURL = urlVal
+						}
 					}
-					if thresholdVal, ok := service["threshold"]; ok {
-						if thresholdFloat, ok := thresholdVal.(float64); ok && thresholdFloat >= 0 && thresholdFloat <= 1 {
-							threshold = thresholdFloat
+				}
+				if thresholdVal, ok := configData["threshold"]; ok {
+					if thresholdFloat, ok := thresholdVal.(float64); ok && thresholdFloat >= 0 && thresholdFloat <= 1 {
+						threshold = thresholdFloat
+					}
+				}
+				if serviceMode == "" {
+					if modeVal, ok := configData["mode"].(string); ok {
+						mode := strings.ToLower(strings.TrimSpace(modeVal))
+						if mode != "" {
+							serviceMode = mode
 						}
 					}
 				}
 			}
 		}
 	}
-	// 如果获取到了 base_url，添加到响应中
-	if baseURL != "" {
-		response["voice_identify"] = gin.H{
-			"base_url":  baseURL,
+	if serviceMode == "" && baseURL != "" {
+		serviceMode = "http"
+	}
+	switch serviceMode {
+	case "":
+		if baseURL != "" {
+			serviceMode = "http"
+		}
+	case "http", "embed":
+	default:
+		log.Printf("voice_identify.mode 配置非法: %s，回退 http", serviceMode)
+		serviceMode = "http"
+	}
+
+	if baseURL != "" || serviceMode == "embed" {
+		voiceIdentifyCfg := gin.H{
 			"threshold": threshold,
 			"enable":    enabled,
 		}
+		if baseURL != "" {
+			voiceIdentifyCfg["base_url"] = baseURL
+		}
+		if serviceMode != "" {
+			voiceIdentifyCfg["mode"] = serviceMode
+		}
+		response["voice_identify"] = voiceIdentifyCfg
 	}
 
 	// 处理 TTS 配置，返回格式与 config.yaml 一致，使用 config_id 作为 key

@@ -4,26 +4,31 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	stdlog "log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"xiaozhi-esp32-server-golang/internal/app/server"
 	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 	log "xiaozhi-esp32-server-golang/logger"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
 func main() {
+	bootstrapEarlyLogging()
+
 	// 解析命令行参数
 	configFile := flag.String("c", defaultConfigFilePath, "配置文件路径")
 	managerEnable := flag.Bool("manager-enable", defaultManagerEnable, "是否启用内嵌 manager")
 	managerConfig := flag.String("manager-config", "", "manager 配置文件路径，启用时可选，默认 manager/backend/config/config.json")
 	asrEnable := flag.Bool("asr-enable", defaultAsrEnable, "是否启用内嵌 asr_server")
-	asrConfig := flag.String("asr-config", "", "asr_server 配置文件路径，启用时可选，默认 asr_server/config.json")
+	asrConfig := flag.String("asr-config", "", "asr_server 配置文件路径，启用时可选，默认 asr_server.json")
 	flag.Parse()
 
 	if *configFile == "" {
@@ -35,12 +40,21 @@ func main() {
 	if *managerEnable {
 		StartManagerHTTP(*managerConfig)
 	}
-	if *asrEnable {
-		StartAsrServerHTTP(*asrConfig)
-	}
+
 	err := Init(*configFile)
 	if err != nil {
 		return
+	}
+
+	if shouldInitAsrServerEmbed() {
+		// 使用 Init 后的最终配置判断并预初始化内嵌 ASR，避免后续懒加载。
+		// 触发条件：
+		// 1) ASR provider 为 embed
+		// 2) 声纹服务模式为 embed（即使 ASR provider 不是 embed，也需要共享引擎）
+		InitAsrServerEmbed(*asrConfig)
+	}
+	if *asrEnable {
+		StartAsrServerHTTP(*asrConfig)
 	}
 
 	// 根据配置启动 pprof 服务
@@ -143,11 +157,16 @@ func main() {
 	if *managerEnable {
 		StopManagerHTTP()
 	}
-	if *asrEnable {
-		StopAsrServerHTTP()
-	}
+	ShutdownAsrServer()
 
 	log.Info("服务器已关闭")
+}
+
+// bootstrapEarlyLogging 配置启动早期日志输出，避免日志系统初始化前写入 stderr 导致终端显示为红字。
+func bootstrapEarlyLogging() {
+	log.UseStdout()
+	logrus.SetOutput(os.Stdout)
+	stdlog.SetOutput(os.Stdout)
 }
 
 func udpListenChanged(newUdpCfg interface{}, oldUdpCfg interface{}) bool {
@@ -176,4 +195,27 @@ func udpListenHostPort(cfg interface{}) (string, int) {
 		return "", 0
 	}
 	return parsed.ListenHost, parsed.ListenPort
+}
+
+// shouldInitAsrServerEmbed 判断是否需要预初始化内嵌 asr_server 共享引擎。
+func shouldInitAsrServerEmbed() bool {
+	asrSelected := strings.TrimSpace(viper.GetString("asr.provider"))
+	if strings.EqualFold(asrSelected, "embed") {
+		return true
+	}
+
+	// manager 下发场景中 asr.provider 可能是默认 config_id（例如 "asr_embed_1"），
+	// 需要反查 asr.<config_id>.provider 是否为 embed。
+	if asrSelected != "" {
+		asrMap := viper.GetStringMap("asr")
+		if selectedCfg, ok := asrMap[asrSelected].(map[string]interface{}); ok {
+			if p, ok := selectedCfg["provider"].(string); ok && strings.EqualFold(strings.TrimSpace(p), "embed") {
+				return true
+			}
+		}
+	}
+
+	serviceMode := strings.ToLower(strings.TrimSpace(viper.GetString("voice_identify.mode")))
+
+	return serviceMode == "embed"
 }

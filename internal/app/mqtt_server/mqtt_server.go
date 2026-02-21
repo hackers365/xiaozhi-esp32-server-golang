@@ -18,6 +18,14 @@ var (
 	serverMu      sync.Mutex
 )
 
+// GetCurrentServer 返回当前正在运行的 MQTT Server 实例。
+// 返回 nil 表示 MQTT Server 尚未启动或已停止。
+func GetCurrentServer() *mqttServer.Server {
+	serverMu.Lock()
+	defer serverMu.Unlock()
+	return currentServer
+}
+
 // StartMqttServer 启动 MQTT 服务器（可被 StopMqttServer 后再次调用以热更）
 func StartMqttServer() error {
 	serverMu.Lock()

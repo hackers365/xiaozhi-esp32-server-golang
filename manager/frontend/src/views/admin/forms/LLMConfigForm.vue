@@ -11,6 +11,12 @@
         <el-option label="SiliconFlow" value="siliconflow" />
         <el-option label="DeepSeek" value="deepseek" />
       </el-select>
+      <div v-if="currentProviderMeta.docUrl" class="form-link-tip">
+        文档地址：
+        <el-link :href="currentProviderMeta.docUrl" target="_blank" type="primary">
+          {{ currentProviderMeta.docUrl }}
+        </el-link>
+      </div>
     </el-form-item>
     <el-form-item label="配置名称" prop="name">
       <el-input v-model="model.name" placeholder="请输入配置名称" />
@@ -29,6 +35,12 @@
     </el-form-item>
     <el-form-item label="API密钥" prop="api_key">
       <el-input v-model="model.api_key" type="password" placeholder="请输入API密钥" show-password />
+      <div v-if="currentProviderMeta.keyUrl" class="form-link-tip">
+        获取密钥：
+        <el-link :href="currentProviderMeta.keyUrl" target="_blank" type="primary">
+          {{ currentProviderMeta.keyUrl }}
+        </el-link>
+      </div>
     </el-form-item>
     <el-form-item label="基础URL" prop="base_url">
       <el-input v-model="model.base_url" placeholder="请输入基础URL" style="width: 100%" />
@@ -46,17 +58,60 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+
+const providerMeta = {
+  openai: {
+    baseUrl: 'https://api.openai.com/v1',
+    docUrl: 'https://developers.openai.com/api/docs',
+    keyUrl: 'https://platform.openai.com/api-keys'
+  },
+  azure: {
+    baseUrl: 'https://your-resource-name.openai.azure.com',
+    docUrl: 'https://learn.microsoft.com/azure/ai-services/openai',
+    keyUrl: 'https://portal.azure.com'
+  },
+  anthropic: {
+    baseUrl: 'https://api.anthropic.com',
+    docUrl: 'https://docs.anthropic.com/',
+    keyUrl: 'https://console.anthropic.com/settings/keys'
+  },
+  zhipu: {
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    docUrl: 'https://open.bigmodel.cn/dev/api',
+    keyUrl: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys'
+  },
+  aliyun: {
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    docUrl: 'https://help.aliyun.com/zh/model-studio/',
+    keyUrl: 'https://help.aliyun.com/zh/model-studio/get-api-key'
+  },
+  doubao: {
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    docUrl: 'https://www.volcengine.com/docs/82379',
+    keyUrl: 'https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey'
+  },
+  siliconflow: {
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    docUrl: 'https://docs.siliconflow.cn/',
+    keyUrl: 'https://cloud.siliconflow.cn/account/ak'
+  },
+  deepseek: {
+    baseUrl: 'https://api.deepseek.com/v1',
+    docUrl: 'https://api-docs.deepseek.com/',
+    keyUrl: 'https://platform.deepseek.com/api_keys'
+  }
+}
 
 const quickUrls = {
-  openai: 'https://api.openai.com/v1',
-  azure: 'https://your-resource-name.openai.azure.com',
-  anthropic: 'https://api.anthropic.com',
-  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
-  aliyun: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  doubao: 'https://ark.cn-beijing.volces.com/api/v3',
-  siliconflow: 'https://api.siliconflow.cn/v1',
-  deepseek: 'https://api.deepseek.com/v1'
+  openai: providerMeta.openai.baseUrl,
+  azure: providerMeta.azure.baseUrl,
+  anthropic: providerMeta.anthropic.baseUrl,
+  zhipu: providerMeta.zhipu.baseUrl,
+  aliyun: providerMeta.aliyun.baseUrl,
+  doubao: providerMeta.doubao.baseUrl,
+  siliconflow: providerMeta.siliconflow.baseUrl,
+  deepseek: providerMeta.deepseek.baseUrl
 }
 
 const props = defineProps({
@@ -65,6 +120,7 @@ const props = defineProps({
 })
 
 const formRef = ref()
+const currentProviderMeta = computed(() => providerMeta[props.model?.provider] || {})
 
 watch(() => props.model?.provider, (value) => {
   if (value && quickUrls[value] && props.model) {
@@ -102,3 +158,13 @@ function resetFields() {
 
 defineExpose({ validate, getJsonData, resetFields })
 </script>
+
+<style scoped>
+.form-link-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.4;
+  word-break: break-all;
+}
+</style>

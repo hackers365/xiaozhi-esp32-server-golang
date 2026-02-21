@@ -3,8 +3,8 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"io"
-	"math"
 	"os"
 	"strings"
 	"time"
@@ -22,51 +22,41 @@ import (
 )
 
 // DefaultTestWavPath 配置测试用固定 WAV 路径（16kHz 单声道，约 1–3 秒），可选
-const DefaultTestWavPath = "internal/testdata/config_test.wav"
+const DefaultTestWavPath = "testdata/config_test.wav"
 
 // DefaultTestText LLM/TTS 固定测试文本
 const DefaultTestText = "配置测试"
-
-// 用于 VAD/ASR 的备用 PCM：约 1 秒模拟语音 16kHz 单声道，无文件时使用
-// 使用合成噪声模拟真实语音，以便 ASR 服务端能正常处理（特别是 Manual 模式需要 commit）
-var fallbackPCM = func() []float32 {
-	pcm := make([]float32, 16000)
-	// 生成模拟语音信号：使用多个正弦波叠加 + 噪声
-	// 模拟中文"配置测试"的基本频率范围
-	// 增加幅度以使服务端能识别为有效音频（Manual 模式要求更高）
-	for i := range pcm {
-		t := float64(i) / 16000.0
-		// 基频 + 谐波模拟语音，大幅增加幅度
-		sample := float32(0.5 * math.Sin(2*math.Pi*t*400))   // 基频 400Hz，幅度 0.5
-		sample += float32(0.25 * math.Sin(2*math.Pi*t*800))  // 谐波，幅度 0.25
-		sample += float32(0.15 * math.Sin(2*math.Pi*t*1200)) // 谐波，幅度 0.15
-		sample += float32(0.1 * math.Sin(2*math.Pi*t*2000))  // 谐波，幅度 0.1
-		// 添加噪声，大幅增加噪声水平
-		sample += (float32(i%100)-50) / 2000 // 噪声幅度增加到 0.05
-		// 应用包络（淡入淡出）
-		env := float32(1.0)
-		if i < 1000 {
-			env = float32(i) / 1000
-		} else if i > 15000 {
-			env = float32(16000-i) / 1000
-		}
-		pcm[i] = sample * env
-	}
-	log.Debugf("[config_test] fallbackPCM 生成: len=%d", len(pcm))
-	return pcm
-}()
 
 // loadTestWav 加载固定 WAV 为 float32 PCM，若文件不存在则返回 nil 与 nil error（调用方用 fallbackPCM）
 func loadTestWav(path string) ([]float32, error) {
 	if path == "" {
 		path = DefaultTestWavPath
 	}
+
 	f, err := os.Open(path)
+	if err == nil {
+		defer f.Close()
+		return decodeWavToPCM(wav.NewDecoder(f))
+	}
+
+	// 外部测试文件不可用时，回退到内置的真实语音样本（internal/domain/config/manager/testdata/zh.wav）。
+	embeddedPCM, err := loadEmbeddedConfigTestWav()
 	if err != nil {
+		return nil, err
+	}
+	if len(embeddedPCM) > 0 {
+		log.Debugf("[config_test] 使用内置测试 WAV: internal/domain/config/manager/testdata/zh.wav")
+		return embeddedPCM, nil
+	}
+
+	return nil, nil
+}
+
+// decodeWavToPCM 将 WAV 解码为 float32 PCM；无效输入返回 nil,nil。
+func decodeWavToPCM(dec *wav.Decoder) ([]float32, error) {
+	if dec == nil {
 		return nil, nil
 	}
-	defer f.Close()
-	dec := wav.NewDecoder(f)
 	if !dec.IsValidFile() {
 		return nil, nil
 	}
@@ -88,6 +78,20 @@ func loadTestWav(path string) ([]float32, error) {
 		}
 	}
 	return out, nil
+}
+
+// requireAsrServerEmbed 确保 embed 模式所需的 asr_server 已初始化。
+func requireAsrServerEmbed() error {
+	if asr.IsAsrServerEmbedInitialized() {
+		return nil
+	}
+	configPath := ""
+	if f := flag.Lookup("asr-config"); f != nil {
+		if v := strings.TrimSpace(f.Value.String()); v != "" {
+			configPath = v
+		}
+	}
+	return asr.InitAsrServerEmbed(configPath)
 }
 
 // RunConfigTest 根据下发的 data（与实时配置一致）执行 VAD/ASR/LLM/TTS 轻量测试，返回每类按 config_id 的结果
@@ -119,11 +123,7 @@ func RunConfigTest(data map[string]interface{}, testText string) (vadResult, asr
 		}
 	}
 
-	pcm, _ := loadTestWav(DefaultTestWavPath)
-	if pcm == nil || len(pcm) == 0 {
-		log.Debugf("[config_test] WAV 文件加载失败或为空，使用 fallbackPCM")
-		pcm = fallbackPCM
-	}
+	pcm, _ := loadTestWav("")
 	log.Debugf("[config_test] 使用 PCM 数据: len=%d", len(pcm))
 
 	// VAD：统计处理耗时（从调用 IsVAD 到返回）
@@ -171,6 +171,12 @@ func RunConfigTest(data map[string]interface{}, testText string) (vadResult, asr
 			asrEngineType := "funasr"
 			if p, ok := cfg["provider"].(string); ok && p != "" {
 				asrEngineType = p
+			}
+			if strings.EqualFold(asrEngineType, "embed") {
+				if err := requireAsrServerEmbed(); err != nil {
+					asrResult[configID] = map[string]interface{}{"ok": false, "message": err.Error()}
+					continue
+				}
 			}
 			wrapper, err := pool.Acquire[asr.AsrProvider]("asr", asrEngineType, cfg)
 			if err != nil {

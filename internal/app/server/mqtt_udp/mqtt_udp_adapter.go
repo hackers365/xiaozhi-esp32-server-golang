@@ -3,13 +3,17 @@ package mqtt_udp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	mochiServer "github.com/mochi-mqtt/server/v2"
+	"github.com/mochi-mqtt/server/v2/packets"
 
+	"xiaozhi-esp32-server-golang/internal/app/mqtt_server"
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 	"xiaozhi-esp32-server-golang/internal/data/client"
 	. "xiaozhi-esp32-server-golang/internal/data/client"
@@ -26,16 +30,40 @@ type MqttConfig struct {
 	Password string
 }
 
+func sameMqttConfig(a *MqttConfig, b *MqttConfig) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Broker == b.Broker &&
+		a.Type == b.Type &&
+		a.Port == b.Port &&
+		a.ClientID == b.ClientID &&
+		a.Username == b.Username &&
+		a.Password == b.Password
+}
+
+type inboundMessage struct {
+	topic   string
+	payload []byte
+}
+
 // MqttUdpAdapter MQTT-UDP适配器结构
 type MqttUdpAdapter struct {
 	client          mqtt.Client
+	publisher       mqttPublisher
 	udpServer       *UdpServer
 	mqttConfig      *MqttConfig
 	deviceId2Conn   *sync.Map
-	msgChan         chan mqtt.Message
+	msgChan         chan inboundMessage
 	onNewConnection types.OnNewConnection
 	stopCtx         context.Context
 	stopCancel      context.CancelFunc
+
+	inlineServer     *mochiServer.Server
+	inlineSubID      int
+	inlineSubFilter  string
+	inlineSubscribed bool
+
 	sync.RWMutex
 }
 
@@ -59,11 +87,13 @@ func WithOnNewConnection(onNewConnection types.OnNewConnection) MqttUdpAdapterOp
 func NewMqttUdpAdapter(config *MqttConfig, opts ...MqttUdpAdapterOption) *MqttUdpAdapter {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &MqttUdpAdapter{
-		mqttConfig:    config,
-		deviceId2Conn: &sync.Map{},
-		msgChan:       make(chan mqtt.Message, 10000),
-		stopCtx:       ctx,
-		stopCancel:    cancel,
+		mqttConfig:      config,
+		deviceId2Conn:   &sync.Map{},
+		msgChan:         make(chan inboundMessage, 10000),
+		stopCtx:         ctx,
+		stopCancel:      cancel,
+		inlineSubID:     10001,
+		inlineSubFilter: ServerSubTopicPrefix,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -84,7 +114,26 @@ func (s *MqttUdpAdapter) setClient(client mqtt.Client) {
 	s.Lock()
 	s.client = client
 	s.Unlock()
-	s.updateSessionsClient(client)
+
+	if client == nil {
+		s.setPublisher(nil)
+		return
+	}
+	s.setPublisher(&pahoPublisher{client: client})
+}
+
+func (s *MqttUdpAdapter) getPublisher() mqttPublisher {
+	s.RLock()
+	publisher := s.publisher
+	s.RUnlock()
+	return publisher
+}
+
+func (s *MqttUdpAdapter) setPublisher(publisher mqttPublisher) {
+	s.Lock()
+	s.publisher = publisher
+	s.Unlock()
+	s.updateSessionsPublisher(publisher)
 }
 
 func (s *MqttUdpAdapter) getUdpServer() *UdpServer {
@@ -100,10 +149,19 @@ func (s *MqttUdpAdapter) setUdpServer(udpServer *UdpServer) {
 	s.Unlock()
 }
 
-func (s *MqttUdpAdapter) updateSessionsClient(client mqtt.Client) {
+func (s *MqttUdpAdapter) getProvider() string {
+	s.RLock()
+	defer s.RUnlock()
+	if s.mqttConfig == nil {
+		return mqttProviderInline
+	}
+	return normalizeMqttType(s.mqttConfig.Type)
+}
+
+func (s *MqttUdpAdapter) updateSessionsPublisher(publisher mqttPublisher) {
 	s.deviceId2Conn.Range(func(key, value interface{}) bool {
 		if conn, ok := value.(*MqttUdpConn); ok {
-			conn.SetMqttClient(client)
+			conn.SetPublisher(publisher)
 		}
 		return true
 	})
@@ -121,7 +179,18 @@ func (s *MqttUdpAdapter) clearDeviceSessions() {
 
 // Start 启动 MQTT 客户端（非阻塞）：在后台 goroutine 中连接并重试，不阻塞程序运行
 func (s *MqttUdpAdapter) Start() error {
-	Infof("MqttUdpAdapter开始启动，后台连接MQTT服务器 Broker=%s:%d ClientID=%s", s.mqttConfig.Broker, s.mqttConfig.Port, s.mqttConfig.ClientID)
+	if s.getProvider() == mqttProviderInline {
+		Info("MqttUdpAdapter使用内联模式启动")
+		go s.connectInlineAndRetry()
+		return nil
+	}
+
+	s.RLock()
+	cfg := s.mqttConfig
+	s.RUnlock()
+	if cfg != nil {
+		Infof("MqttUdpAdapter开始启动，后台连接MQTT服务器 Broker=%s:%d ClientID=%s", cfg.Broker, cfg.Port, cfg.ClientID)
+	}
 	go s.connectAndRetry()
 	return nil
 }
@@ -150,7 +219,7 @@ func (s *MqttUdpAdapter) connectAndRetry() {
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
 		Info("MQTT已连接")
 		topic := ServerSubTopicPrefix
-		if token := client.Subscribe(topic, 0, s.handleMessage); token.Wait() && token.Error() != nil {
+		if token := client.Subscribe(topic, 0, s.handleNetworkMessage); token.Wait() && token.Error() != nil {
 			Errorf("订阅主题失败: %v", token.Error())
 		}
 	})
@@ -162,6 +231,7 @@ func (s *MqttUdpAdapter) connectAndRetry() {
 			return
 		default:
 		}
+
 		client := mqtt.NewClient(opts)
 		s.setClient(client)
 		if token := client.Connect(); token.Wait() && token.Error() != nil {
@@ -178,6 +248,87 @@ func (s *MqttUdpAdapter) connectAndRetry() {
 	}
 
 	_ = s.checkClientActive()
+}
+
+func (s *MqttUdpAdapter) connectInlineAndRetry() {
+	const retryInterval = 3 * time.Second
+	var retryCount int
+	for {
+		select {
+		case <-s.stopCtx.Done():
+			return
+		default:
+		}
+
+		if err := s.subscribeInline(); err != nil {
+			retryCount++
+			Errorf("连接inline MQTT失败(第%d次): %v，%d秒后重试", retryCount, err, int(retryInterval.Seconds()))
+			select {
+			case <-s.stopCtx.Done():
+				return
+			case <-time.After(retryInterval):
+				continue
+			}
+		}
+		break
+	}
+
+	_ = s.checkClientActive()
+}
+
+func (s *MqttUdpAdapter) subscribeInline() error {
+	srv := mqtt_server.GetCurrentServer()
+	if srv == nil {
+		return errors.New("mqtt_server尚未启动")
+	}
+
+	s.Lock()
+	oldSrv := s.inlineServer
+	wasSubscribed := s.inlineSubscribed
+	subID := s.inlineSubID
+	filter := s.inlineSubFilter
+	s.Unlock()
+
+	if wasSubscribed && oldSrv != nil && oldSrv != srv {
+		if err := oldSrv.Unsubscribe(filter, subID); err != nil {
+			Warnf("inline MQTT取消旧订阅失败: %v", err)
+		}
+	}
+
+	if wasSubscribed && oldSrv == srv {
+		s.setPublisher(&inlinePublisher{})
+		return nil
+	}
+
+	if err := srv.Subscribe(filter, subID, s.handleInlineMessage); err != nil {
+		return err
+	}
+
+	s.Lock()
+	s.inlineServer = srv
+	s.inlineSubscribed = true
+	s.Unlock()
+
+	s.setPublisher(&inlinePublisher{})
+	Info("inline MQTT订阅已建立")
+	return nil
+}
+
+func (s *MqttUdpAdapter) unsubscribeInline() {
+	s.Lock()
+	srv := s.inlineServer
+	wasSubscribed := s.inlineSubscribed
+	subID := s.inlineSubID
+	filter := s.inlineSubFilter
+	s.inlineServer = nil
+	s.inlineSubscribed = false
+	s.Unlock()
+
+	if wasSubscribed && srv != nil {
+		if err := srv.Unsubscribe(filter, subID); err != nil {
+			Warnf("inline MQTT取消订阅失败: %v", err)
+		}
+	}
 }
 
 func (s *MqttUdpAdapter) checkClientActive() error {
@@ -215,13 +366,20 @@ func (s *MqttUdpAdapter) getDeviceSession(deviceId string) *MqttUdpConn {
 	return nil
 }
 
-// handleMessage 将消息丢进队列
-func (s *MqttUdpAdapter) handleMessage(client mqtt.Client, msg mqtt.Message) {
+func (s *MqttUdpAdapter) handleNetworkMessage(_ mqtt.Client, msg mqtt.Message) {
+	s.enqueueMessage(msg.Topic(), msg.Payload())
+}
+
+func (s *MqttUdpAdapter) handleInlineMessage(_ *mochiServer.Client, _ packets.Subscription, pk packets.Packet) {
+	s.enqueueMessage(pk.TopicName, pk.Payload)
+}
+
+func (s *MqttUdpAdapter) enqueueMessage(topic string, payload []byte) {
 	select {
-	case s.msgChan <- msg:
+	case s.msgChan <- inboundMessage{topic: topic, payload: payload}:
 		return
 	default:
-		Debugf("handleMessage msg chan is full, topic: %s, payload: %s", msg.Topic(), string(msg.Payload()))
+		Debugf("handleMessage msg chan is full, topic: %s, payload: %s", topic, string(payload))
 	}
 }
 
@@ -246,11 +404,15 @@ func (s *MqttUdpAdapter) Stop() {
 	Debugf("enter MqttUdpAdapter Stop ")
 	defer Debugf("exit MqttUdpAdapter Stop ")
 	s.stopCancel()
+
 	client := s.getClient()
 	if client != nil && client.IsConnected() {
 		Debugf("MqttUdpAdapter Stop, disconnect mqtt client")
 		client.Disconnect(250)
 	}
+	s.unsubscribeInline()
+	s.setClient(nil)
+
 	udpServer := s.getUdpServer()
 	Debugf("MqttUdpAdapter Stop, udpServer: %v", udpServer)
 	if udpServer != nil {
@@ -265,14 +427,30 @@ func (s *MqttUdpAdapter) ReloadMqttClient(newConfig *MqttConfig) {
 	if newConfig == nil {
 		return
 	}
+
 	s.Lock()
-	s.mqttConfig = newConfig
+	oldConfig := s.mqttConfig
 	oldClient := s.client
+	// 网络模式下，如果配置未变化，避免无意义重连（例如 mqtt_server 重启场景）。
+	if normalizeMqttType(newConfig.Type) == mqttProviderNetwork && sameMqttConfig(oldConfig, newConfig) {
+		s.Unlock()
+		return
+	}
+	s.mqttConfig = newConfig
 	s.Unlock()
+
 	if oldClient != nil && oldClient.IsConnected() {
 		oldClient.Disconnect(250)
 	}
+
+	s.unsubscribeInline()
+	s.setClient(nil)
 	s.clearDeviceSessions()
+
+	if normalizeMqttType(newConfig.Type) == mqttProviderInline {
+		go s.connectInlineAndRetry()
+		return
+	}
 	go s.connectAndRetry()
 }
 
@@ -296,15 +474,15 @@ func (s *MqttUdpAdapter) processMessage() {
 		case <-s.stopCtx.Done():
 			return
 		case msg := <-s.msgChan:
-			Debugf("mqtt handleMessage, topic: %s, payload: %s", msg.Topic(), string(msg.Payload()))
+			Debugf("mqtt handleMessage, topic: %s, payload: %s", msg.topic, string(msg.payload))
 			var clientMsg ClientMessage
-			if err := json.Unmarshal(msg.Payload(), &clientMsg); err != nil {
+			if err := json.Unmarshal(msg.payload, &clientMsg); err != nil {
 				Errorf("解析JSON失败: %v", err)
 				continue
 			}
-			topicMacAddr, deviceId := s.getDeviceIdByTopic(msg.Topic())
+			topicMacAddr, deviceId := s.getDeviceIdByTopic(msg.topic)
 			if deviceId == "" {
-				Errorf("mac_addr解析失败: %v", msg.Topic())
+				Errorf("mac_addr解析失败: %v", msg.topic)
 				continue
 			}
 
@@ -324,12 +502,12 @@ func (s *MqttUdpAdapter) processMessage() {
 
 				publicTopic := fmt.Sprintf("%s%s", client.ServerPubTopicPrefix, topicMacAddr)
 
-				mqttClient := s.getClient()
-				if mqttClient == nil {
-					Errorf("mqtt client is nil, deviceId: %s", deviceId)
+				publisher := s.getPublisher()
+				if publisher == nil {
+					Errorf("mqtt publisher is nil, deviceId: %s", deviceId)
 					continue
 				}
-				deviceSession = NewMqttUdpConn(deviceId, publicTopic, mqttClient, udpServer, udpSession)
+				deviceSession = NewMqttUdpConn(deviceId, publicTopic, publisher, udpServer, udpSession)
 
 				strAesKey, strFullNonce := udpSession.GetAesKeyAndNonce()
 				deviceSession.SetData("aes_key", strAesKey)
@@ -343,7 +521,7 @@ func (s *MqttUdpAdapter) processMessage() {
 				s.onNewConnection(deviceSession)
 			}
 
-			err := deviceSession.PushMsgToRecvCmd(msg.Payload())
+			err := deviceSession.PushMsgToRecvCmd(msg.payload)
 			if err != nil {
 				Errorf("InternalRecvCmd失败: %v", err)
 				continue

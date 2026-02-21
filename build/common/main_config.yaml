@@ -54,12 +54,12 @@ websocket:
 # MQTT客户端配置（连接外部MQTT服务器）
 mqtt:
   enable: true                # 是否启用MQTT客户端, 当此值为false时会同时关闭udp服务器
-  broker: "127.0.0.1"         # MQTT代理服务器地址
-  type: "tcp"                 # 连接类型
-  port: 2883                  # MQTT端口
-  client_id: "xiaozhi_server" # 客户端ID
-  username: "admin"           # MQTT用户名
-  password: "test!@#"         # MQTT密码
+  type: "embed"               # 连接类型: embed(进程内直连mqtt_server)； tcp/ssl/ws/wss/mqtt/tls/mqtts/mqtt+ssl/tcps/unix
+#  broker: "127.0.0.1"         # MQTT代理服务器地址
+#  port: 2883                  # MQTT端口
+#  client_id: "xiaozhi_server" # 客户端ID
+#  username: "admin"           # MQTT用户名
+#  password: "test!@#"         # MQTT密码
 
 # MQTT服务器配置（作为MQTT服务器运行）
 mqtt_server:
@@ -123,7 +123,7 @@ vad:
 
 # 自动语音识别（ASR）配置
 asr:
-  provider: "funasr"  # ASR提供商：funasr 或 doubao
+  provider: "embed"  # ASR提供商：funasr 或 doubao
   # FunASR配置
   funasr:
     host: "127.0.0.1"          # FunASR服务器地址

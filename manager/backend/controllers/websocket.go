@@ -15,6 +15,7 @@ import (
 	cmap "github.com/orcaman/concurrent-map/v2"
 	"gorm.io/gorm"
 
+	"xiaozhi/manager/backend/buildinfo"
 	"xiaozhi/manager/backend/models"
 )
 
@@ -331,12 +332,17 @@ func (client *WebSocketClient) processRequest(request *WebSocketRequest) {
 
 // 处理服务器信息请求
 func (client *WebSocketClient) handleServerInfoRequest(request *WebSocketRequest) {
+	uptimeSeconds := buildinfo.UptimeSeconds()
 	response := map[string]interface{}{
-		"server_name": "xiaozhi-manager-backend",
-		"version":     "1.0.0",
-		"uptime":      time.Now().Format(time.RFC3339),
-		"request_id":  request.ID,
-		"client_id":   client.ID,
+		"server_name":    "xiaozhi-manager-backend",
+		"version":        buildinfo.Version,
+		"commit":         buildinfo.Commit,
+		"build_time":     buildinfo.BuildTime,
+		"started_at":     buildinfo.StartedAtRFC3339(),
+		"uptime":         buildinfo.UptimeText(uptimeSeconds),
+		"uptime_seconds": uptimeSeconds,
+		"request_id":     request.ID,
+		"client_id":      client.ID,
 	}
 
 	client.sendResponse(request.ID, 200, response, "")

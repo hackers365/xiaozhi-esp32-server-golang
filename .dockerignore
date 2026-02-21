@@ -1,4 +1,6 @@
 **/.git
+!/.git
+!/.git/**
 **/node_modules
 **/*.log
 **/bin

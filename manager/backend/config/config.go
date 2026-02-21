@@ -22,7 +22,7 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
-	Type   string        `json:"type"`             // "mysql" 或 "sqlite"，决定使用哪种数据库
+	Type   string        `json:"type"` // "mysql" 或 "sqlite"，决定使用哪种数据库
 	MySQL  *MySQLConfig  `json:"mysql,omitempty"`
 	SQLite *SQLiteConfig `json:"sqlite,omitempty"`
 }
@@ -62,7 +62,8 @@ type JWTConfig struct {
 }
 
 type SpeakerServiceConfig struct {
-	URL string `json:"url"` // asr_server 的服务地址
+	URL  string `json:"url"`  // HTTP 模式下 asr_server 的服务地址
+	Mode string `json:"mode"` // 服务模式: http / embed
 }
 
 type StorageConfig struct {
@@ -110,6 +111,9 @@ func LoadWithPath(configPath string) *Config {
 	// 优先使用环境变量覆盖声纹服务配置
 	if serviceURL := os.Getenv("SPEAKER_SERVICE_URL"); serviceURL != "" {
 		config.SpeakerService.URL = serviceURL
+	}
+	if serviceMode := os.Getenv("SPEAKER_SERVICE_MODE"); serviceMode != "" {
+		config.SpeakerService.Mode = serviceMode
 	}
 	// 优先使用环境变量覆盖音频存储路径
 	if audioBasePath := os.Getenv("AUDIO_BASE_PATH"); audioBasePath != "" {

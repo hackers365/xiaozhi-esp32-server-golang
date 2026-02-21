@@ -105,7 +105,16 @@ ESP32 采集音频 → VAD 检测语音 → 同时发送到 ASR 和声纹识别
 
 ## 四、配置说明
 
-### 4.1 主程序配置（config.yaml）
+### 4.1 配置边界（重要）
+
+| 配置项 | 存放位置 | 主要用途 | 常用字段 |
+|--------|----------|----------|----------|
+| `voice_identify` | Manager 系统配置表（`type=voice_identify`），并下发给主服务 | 主服务实时声纹识别 | `enable`、`mode`、`base_url`、`threshold` |
+| `speaker_service` | `manager/backend/config/config.json`（可被环境变量覆盖） | Manager 后台的声纹组/样本管理调用 | `mode`、`url` |
+
+> 两套配置通常会指向同一个 voice-server，但它们不是同一个配置对象，职责不同，不应互相替代。
+
+### 4.2 主服务运行时配置（voice_identify）
 
 在 `config.yaml` 中添加以下配置：
 
@@ -113,17 +122,37 @@ ESP32 采集音频 → VAD 检测语音 → 同时发送到 ASR 和声纹识别
 # 声纹识别配置
 voice_identify:
   enable: true                              # 是否启用声纹识别
-  base_url: "http://voice-server:8080"      # voice-server 服务地址
+  mode: "http"                              # http / embed
+  base_url: "http://voice-server:8080"      # mode=http 时的 voice-server 服务地址
   threshold: 0.6                            # 声纹识别阈值，范围 0.0-1.0
 ```
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
 | `enable` | bool | false | 是否启用声纹识别功能 |
-| `base_url` | string | - | voice-server 服务的 HTTP 地址 |
+| `mode` | string | `http` | `http` 走网络请求；`embed` 走进程内引擎调用 |
+| `base_url` | string | - | `mode=http` 时使用的 voice-server HTTP 地址 |
 | `threshold` | float | 0.6 | 识别阈值，值越高要求匹配越严格 |
 
-### 4.2 Docker Compose 配置
+### 4.3 Manager 后台配置（speaker_service）
+
+在 `manager/backend/config/config.json` 中配置：
+
+```json
+{
+  "speaker_service": {
+    "mode": "http",
+    "url": "http://voice-server:8080"
+  }
+}
+```
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `mode` | string | `http` | Manager 调用声纹服务的模式：`http` / `embed` |
+| `url` | string | - | `mode=http` 时的服务地址 |
+
+### 4.4 Docker Compose 配置
 
 #### Backend 服务环境变量
 
@@ -131,7 +160,12 @@ voice_identify:
 backend:
   environment:
     - SPEAKER_SERVICE_URL=http://voice-server:8080
+    - SPEAKER_SERVICE_MODE=http
 ```
+
+说明：
+- `SPEAKER_SERVICE_URL`：覆盖 Manager 的 `speaker_service.url`，并可用于系统配置中的 `voice_identify.base_url`
+- `SPEAKER_SERVICE_MODE`：覆盖 Manager 的 `speaker_service.mode`，并可用于系统配置中的 `voice_identify.mode`
 
 #### voice-server 服务环境变量
 
@@ -301,6 +335,7 @@ CREATE TABLE `speaker_samples` (
 ```yaml
 voice_identify:
   enable: true
+  mode: "http"
   base_url: "http://voice-server:8080"
   threshold: 0.6
 ```
@@ -354,9 +389,10 @@ voice_identify:
 
 检查以下配置：
 1. `voice_identify.enable` 是否为 `true`
-2. `voice_identify.base_url` 是否正确
-3. 设备是否已配置声纹组
-4. voice-server 服务是否正常运行
+2. `voice_identify.mode` 是否配置为 `http` 或 `embed`
+3. 当 `mode=http` 时，`voice_identify.base_url` 是否正确
+4. 设备是否已配置声纹组
+5. voice-server 服务是否正常运行（`mode=http` 时）
 
 ### Q2: 识别准确率低？
 

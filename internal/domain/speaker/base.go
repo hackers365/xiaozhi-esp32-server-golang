@@ -2,6 +2,9 @@ package speaker
 
 import (
 	"context"
+	"strings"
+
+	log "xiaozhi-esp32-server-golang/logger"
 )
 
 // SpeakerProvider 声纹识别提供者接口
@@ -24,5 +27,20 @@ type SpeakerProvider interface {
 
 // GetSpeakerProvider 获取声纹识别提供者
 func GetSpeakerProvider(config map[string]interface{}) (SpeakerProvider, error) {
+	serviceMode := ""
+	if mode, ok := config["service"].(string); ok && mode != "" {
+		serviceMode = strings.ToLower(strings.TrimSpace(mode))
+	}
+	if serviceMode == "" {
+		if mode, ok := config["mode"].(string); ok && mode != "" {
+			serviceMode = strings.ToLower(strings.TrimSpace(mode))
+		}
+	}
+
+	if serviceMode == "embed" {
+		log.Infof("使用 embed 本地直连声纹提供者")
+		return NewEmbedProvider(config)
+	}
+
 	return NewAsrServerProvider(config)
 }

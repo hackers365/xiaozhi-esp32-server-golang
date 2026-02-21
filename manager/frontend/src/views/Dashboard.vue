@@ -160,12 +160,20 @@
           </template>
           <div class="system-info">
             <div class="info-item">
-              <span class="info-label">系统版本：</span>
-              <span class="info-value">v1.0.0</span>
+              <span class="info-label">管理后台版本：</span>
+              <span class="info-value">{{ systemInfo.manager.version }}</span>
             </div>
             <div class="info-item">
-              <span class="info-label">运行时间：</span>
-              <span class="info-value">{{ uptime }}</span>
+              <span class="info-label">管理后台运行：</span>
+              <span class="info-value">{{ systemInfo.manager.uptime }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">主服务版本：</span>
+              <span class="info-value">{{ systemInfo.server.version }}</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">主服务运行：</span>
+              <span class="info-value">{{ systemInfo.server.uptime }}</span>
             </div>
             <div class="info-item">
               <span class="info-label">当前用户：</span>
@@ -413,7 +421,16 @@ const stats = ref({
   onlineDevices: 0
 })
 
-const uptime = ref('0天 0小时 0分钟')
+const systemInfo = ref({
+  manager: {
+    version: 'unknown',
+    uptime: '0天 0小时 0分钟'
+  },
+  server: {
+    version: '未连接',
+    uptime: '未连接'
+  }
+})
 const fileInput = ref(null)
 
 onMounted(async () => {
@@ -421,26 +438,29 @@ onMounted(async () => {
   if (authStore.isAdmin) {
     loadServiceAddress()
   }
-  
-  // 模拟运行时间
-  const startTime = new Date('2024-01-01')
-  const now = new Date()
-  const diff = now - startTime
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24))
-  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-  uptime.value = `${days}天 ${hours}小时 ${minutes}分钟`
 })
 
 // 加载统计数据
 const loadStats = async () => {
   try {
     const response = await api.get('/dashboard/stats')
+    const manager = response.data?.manager || {}
+    const server = response.data?.server || null
     stats.value = {
       totalUsers: response.data.totalUsers || 0,
       totalDevices: response.data.totalDevices || 0,
       totalAgents: response.data.totalAgents || 0,
       onlineDevices: response.data.onlineDevices || 0
+    }
+    systemInfo.value = {
+      manager: {
+        version: manager.version || 'unknown',
+        uptime: manager.uptime || '0天 0小时 0分钟'
+      },
+      server: {
+        version: server?.version || '未连接',
+        uptime: server?.uptime || '未连接'
+      }
     }
   } catch (error) {
     console.error('加载统计数据失败:', error)
@@ -450,6 +470,16 @@ const loadStats = async () => {
       totalDevices: 0,
       totalAgents: 0,
       onlineDevices: 0
+    }
+    systemInfo.value = {
+      manager: {
+        version: 'unknown',
+        uptime: '0天 0小时 0分钟'
+      },
+      server: {
+        version: '未连接',
+        uptime: '未连接'
+      }
     }
   }
 }
@@ -735,7 +765,7 @@ const handleFileChange = async (event) => {
 }
 
 .info-label {
-  width: 100px;
+  width: 120px;
   color: #666;
 }
 

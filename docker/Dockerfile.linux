@@ -56,9 +56,25 @@ RUN SHERPA_ONNX_GO_VERSION="$(grep -E 'github.com/k2-fsa/sherpa-onnx-go[[:space:
 ENV PKG_CONFIG_PATH=/opt/opus-linux/lib/pkgconfig
 ENV CGO_LDFLAGS=-lm
 
-RUN go mod tidy \
+ARG VERSION
+ARG COMMIT
+ARG BUILD_TIME
+
+RUN VERSION_VAL="${VERSION}" \
+    && if [ -z "${VERSION_VAL}" ]; then VERSION_VAL="$(git describe --tags --exact-match 2>/dev/null || git describe --tags --abbrev=0 2>/dev/null || echo dev)"; fi \
+    && COMMIT_VAL="${COMMIT}" \
+    && if [ -z "${COMMIT_VAL}" ]; then COMMIT_VAL="$(git rev-parse --short HEAD 2>/dev/null || echo none)"; fi \
+    && BUILD_TIME_VAL="${BUILD_TIME}" \
+    && if [ -z "${BUILD_TIME_VAL}" ]; then BUILD_TIME_VAL="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; fi \
+    && go mod tidy \
     && go build -v -tags "nolibopusfile asr_server manager embed_ui" \
-       -ldflags "-s -w" \
+       -ldflags "-s -w \
+       -X xiaozhi-esp32-server-golang/pkg/buildinfo.Version=${VERSION_VAL} \
+       -X xiaozhi-esp32-server-golang/pkg/buildinfo.Commit=${COMMIT_VAL} \
+       -X xiaozhi-esp32-server-golang/pkg/buildinfo.BuildTime=${BUILD_TIME_VAL} \
+       -X xiaozhi/manager/backend/buildinfo.Version=${VERSION_VAL} \
+       -X xiaozhi/manager/backend/buildinfo.Commit=${COMMIT_VAL} \
+       -X xiaozhi/manager/backend/buildinfo.BuildTime=${BUILD_TIME_VAL}" \
        -o xiaozhi_server ./cmd/server
 
 RUN upx --lzma xiaozhi_server -o xiaozhi_server.upx && mv xiaozhi_server.upx xiaozhi_server || true

@@ -1,19 +1,15 @@
 package controllers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"xiaozhi/manager/backend/config"
@@ -27,11 +23,10 @@ import (
 
 // SpeakerGroupController 声纹组控制器
 type SpeakerGroupController struct {
-	DB            *gorm.DB
-	ServiceURL    string
-	HTTPClient    *http.Client
-	AudioStorage  *storage.AudioStorage
-	HistoryConfig *config.HistoryConfig // 历史聊天记录配置
+	DB             *gorm.DB
+	SpeakerService speakerServiceClient
+	AudioStorage   *storage.AudioStorage
+	HistoryConfig  *config.HistoryConfig // 历史聊天记录配置
 }
 
 // NewSpeakerGroupController 创建声纹组控制器
@@ -40,17 +35,21 @@ func NewSpeakerGroupController(db *gorm.DB, cfg *config.Config) *SpeakerGroupCon
 		Timeout: 30 * time.Second,
 	}
 
+	speakerService, err := newSpeakerServiceClient(cfg.SpeakerService, httpClient)
+	if err != nil {
+		log.Printf("初始化 speaker_service 失败 (mode=%s): %v", cfg.SpeakerService.Mode, err)
+	}
+
 	audioStorage := storage.NewAudioStorage(
 		cfg.Storage.SpeakerAudioPath,
 		cfg.Storage.MaxFileSize,
 	)
 
 	return &SpeakerGroupController{
-		DB:            db,
-		ServiceURL:    cfg.SpeakerService.URL,
-		HTTPClient:    httpClient,
-		AudioStorage:  audioStorage,
-		HistoryConfig: &cfg.History,
+		DB:             db,
+		SpeakerService: speakerService,
+		AudioStorage:   audioStorage,
+		HistoryConfig:  &cfg.History,
 	}
 }
 
@@ -779,64 +778,25 @@ type VerifyResult struct {
 
 // callVerifyAPI 调用 asr_server 验证接口
 func (sgc *SpeakerGroupController) callVerifyAPI(speakerID string, agentID uint, file multipart.File, header *multipart.FileHeader, userID interface{}) (*VerifyResult, error) {
-	// 准备 multipart form data
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
+	if sgc.SpeakerService == nil {
+		return nil, fmt.Errorf("speaker_service 未初始化")
+	}
 
-	// 添加文件
-	part, err := writer.CreateFormFile("audio", header.Filename)
+	audioData, err := readAndResetMultipartFile(file)
 	if err != nil {
-		writer.Close()
-		return nil, fmt.Errorf("创建文件字段失败: %v", err)
+		return nil, err
 	}
 
-	// 重置文件指针
-	file.Seek(0, 0)
-	if _, err := io.Copy(part, file); err != nil {
-		writer.Close()
-		return nil, fmt.Errorf("复制文件内容失败: %v", err)
-	}
-
-	writer.Close()
-
-	// 创建请求
-	apiURL := fmt.Sprintf("%s/api/v1/speaker/verify/%s", sgc.ServiceURL, url.PathEscape(speakerID))
-	req, err := http.NewRequest("POST", apiURL, &requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("创建请求失败: %v", err)
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-User-ID", fmt.Sprintf("%v", userID))
-	req.Header.Set("X-Agent-ID", fmt.Sprintf("%d", agentID)) // 新增 agent_id 请求头
-
-	// 发送请求
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	resp, err := sgc.HTTPClient.Do(req.WithContext(ctx))
-	if err != nil {
-		return nil, fmt.Errorf("发送请求失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取响应失败: %v", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("asr_server 返回错误 (状态码: %d): %s", resp.StatusCode, string(body))
-	}
-
-	// 解析响应
-	var result VerifyResult
-	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("解析响应失败: %v", err)
-	}
-
-	return &result, nil
+	return sgc.SpeakerService.Verify(ctx, speakerVerifyRequest{
+		SpeakerID: speakerID,
+		AgentID:   agentID,
+		UserID:    fmt.Sprintf("%v", userID),
+		AudioData: audioData,
+		FileName:  header.Filename,
+	})
 }
 
 // GetSampleFile 获取样本音频文件
@@ -905,60 +865,27 @@ func (sgc *SpeakerGroupController) GetSampleFile(c *gin.Context) {
 
 // callRegisterAPI 调用 asr_server 注册接口
 func (sgc *SpeakerGroupController) callRegisterAPI(speakerID, speakerName, uuid string, agentID uint, file multipart.File, header *multipart.FileHeader, userID interface{}) error {
-	// 准备 multipart form data
-	var requestBody bytes.Buffer
-	writer := multipart.NewWriter(&requestBody)
+	if sgc.SpeakerService == nil {
+		return fmt.Errorf("speaker_service 未初始化")
+	}
 
-	// 添加字段
-	writer.WriteField("speaker_id", speakerID)
-	writer.WriteField("speaker_name", speakerName)
-	writer.WriteField("uuid", uuid)
-	writer.WriteField("agent_id", fmt.Sprintf("%d", agentID)) // 新增 agent_id 字段
-	writer.WriteField("uid", fmt.Sprintf("%v", userID))
-
-	// 添加文件
-	part, err := writer.CreateFormFile("audio", header.Filename)
+	audioData, err := readAndResetMultipartFile(file)
 	if err != nil {
-		writer.Close()
-		return fmt.Errorf("创建文件字段失败: %v", err)
+		return err
 	}
 
-	// 重置文件指针
-	file.Seek(0, 0)
-	if _, err := io.Copy(part, file); err != nil {
-		writer.Close()
-		return fmt.Errorf("复制文件内容失败: %v", err)
-	}
-
-	writer.Close()
-
-	// 创建请求
-	url := fmt.Sprintf("%s/api/v1/speaker/register", sgc.ServiceURL)
-	req, err := http.NewRequest("POST", url, &requestBody)
-	if err != nil {
-		return fmt.Errorf("创建请求失败: %v", err)
-	}
-
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-User-ID", fmt.Sprintf("%v", userID))
-	req.Header.Set("X-Agent-ID", fmt.Sprintf("%d", agentID)) // 新增 agent_id 请求头
-
-	// 发送请求
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	resp, err := sgc.HTTPClient.Do(req.WithContext(ctx))
-	if err != nil {
-		return fmt.Errorf("发送请求失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("asr_server 返回错误: %s", string(body))
-	}
-
-	return nil
+	return sgc.SpeakerService.Register(ctx, speakerRegisterRequest{
+		SpeakerID:   speakerID,
+		SpeakerName: speakerName,
+		UUID:        uuid,
+		AgentID:     agentID,
+		UserID:      fmt.Sprintf("%v", userID),
+		AudioData:   audioData,
+		FileName:    header.Filename,
+	})
 }
 
 // callDeleteAPI 调用 asr_server 删除接口
@@ -966,50 +893,48 @@ func (sgc *SpeakerGroupController) callRegisterAPI(speakerID, speakerName, uuid 
 // agentID: Agent ID
 // uuid: 可选，如果提供则作为查询参数（用于删除单个样本）
 func (sgc *SpeakerGroupController) callDeleteAPI(speakerID string, agentID uint, userID interface{}, uuid ...string) error {
-	// 构建 URL：路径参数使用 speakerID
-	apiURL := fmt.Sprintf("%s/api/v1/speaker/%s", sgc.ServiceURL, url.PathEscape(speakerID))
+	if sgc.SpeakerService == nil {
+		return fmt.Errorf("speaker_service 未初始化")
+	}
 
-	// 构建查询参数
-	queryParams := make([]string, 0)
+	deleteReq := speakerDeleteRequest{
+		SpeakerID: speakerID,
+		AgentID:   agentID,
+		UserID:    fmt.Sprintf("%v", userID),
+	}
 	if len(uuid) > 0 && uuid[0] != "" {
-		queryParams = append(queryParams, fmt.Sprintf("uuid=%s", url.QueryEscape(uuid[0])))
+		deleteReq.UUID = uuid[0]
 	}
-	queryParams = append(queryParams, fmt.Sprintf("agent_id=%d", agentID))
-
-	if len(queryParams) > 0 {
-		apiURL += "?" + strings.Join(queryParams, "&")
-	}
-
-	req, err := http.NewRequest("DELETE", apiURL, nil)
-	if err != nil {
-		return fmt.Errorf("创建请求失败: %v", err)
-	}
-
-	req.Header.Set("X-User-ID", fmt.Sprintf("%v", userID))
-	req.Header.Set("X-Agent-ID", fmt.Sprintf("%d", agentID)) // 新增 agent_id 请求头
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	resp, err := sgc.HTTPClient.Do(req.WithContext(ctx))
+	err := sgc.SpeakerService.Delete(ctx, deleteReq)
 	if err != nil {
-		return fmt.Errorf("发送请求失败: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		if len(uuid) > 0 && uuid[0] != "" {
-			log.Printf("asr_server 删除失败 (speaker_id: %s, uuid: %s): %s", speakerID, uuid[0], string(body))
-		} else {
-			log.Printf("asr_server 删除失败 (speaker_id: %s): %s", speakerID, string(body))
+		if deleteReq.UUID != "" {
+			log.Printf("asr_server 删除失败 (speaker_id: %s, uuid: %s): %v", speakerID, deleteReq.UUID, err)
+			return nil
 		}
-		// 如果提供了 uuid，不返回错误（可能已经删除或不存在）
-		// 如果是通过 speaker_id 删除，返回错误
-		if len(uuid) == 0 || uuid[0] == "" {
-			return fmt.Errorf("asr_server 返回错误: %s", string(body))
-		}
+		log.Printf("asr_server 删除失败 (speaker_id: %s): %v", speakerID, err)
+		return err
 	}
 
 	return nil
+}
+
+func readAndResetMultipartFile(file multipart.File) ([]byte, error) {
+	if file == nil {
+		return nil, fmt.Errorf("音频文件为空")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("重置文件指针失败: %w", err)
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, fmt.Errorf("读取音频文件失败: %w", err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("重置文件指针失败: %w", err)
+	}
+	return data, nil
 }

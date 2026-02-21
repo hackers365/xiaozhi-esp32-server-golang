@@ -25,7 +25,18 @@
         :rules="rules"
         label-width="120px"
       >
-        <el-form-item label="服务地址" prop="base_url">
+        <el-form-item label="服务模式" prop="mode">
+          <el-select v-model="form.mode" style="width: 100%">
+            <el-option label="HTTP（外部服务）" value="http" />
+            <el-option label="Embed（内置服务）" value="embed" />
+          </el-select>
+          <div class="form-tip">
+            <el-icon><InfoFilled /></el-icon>
+            {{ modeTipText }}
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="isHttpMode" label="服务地址" prop="base_url">
           <el-input 
             v-model="form.base_url" 
             placeholder="请输入HTTP服务地址，如：http://192.168.208.214:8080"
@@ -33,7 +44,7 @@
           />
           <div class="form-tip">
             <el-icon><InfoFilled /></el-icon>
-            请输入HTTP地址，系统会自动转换为WebSocket地址
+            填写声纹服务地址即可，例如：http://127.0.0.1:9000
           </div>
         </el-form-item>
         
@@ -68,7 +79,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import api from '../../utils/api'
@@ -79,18 +90,47 @@ const formRef = ref()
 const currentConfig = ref(null)
 
 const form = reactive({
+  mode: 'http',
   base_url: 'http://192.168.208.214:8080',
   threshold: 0.4,
   enabled: true
 })
 
+const normalizeMode = (value) => {
+  const mode = String(value || '').trim().toLowerCase()
+  return mode === 'embed' ? 'embed' : 'http'
+}
+
+const isHttpMode = computed(() => form.mode === 'http')
+const modeTipText = computed(() => (
+  isHttpMode.value
+    ? 'HTTP 模式：通过服务地址连接声纹服务。'
+    : 'Embed 模式：使用程序内置声纹能力。'
+))
+
 const rules = {
+  mode: [
+    { required: true, message: '请选择服务模式', trigger: 'change' }
+  ],
   base_url: [
-    { required: true, message: '请输入服务地址', trigger: 'blur' },
-    { 
-      pattern: /^https?:\/\/.+/, 
-      message: '请输入有效的HTTP地址，如：http://192.168.208.214:8080', 
-      trigger: 'blur' 
+    {
+      validator: (_rule, value, callback) => {
+        if (!isHttpMode.value) {
+          callback()
+          return
+        }
+        const normalized = String(value || '').trim()
+        if (!normalized) {
+          callback(new Error('请输入服务地址'))
+          return
+        }
+        if (!/^https?:\/\/.+/.test(normalized)) {
+          callback(new Error('请输入有效的HTTP地址，如：http://192.168.208.214:8080'))
+          return
+        }
+        callback()
+      },
+      trigger: ['blur', 'change']
     }
   ],
   threshold: [
@@ -115,14 +155,19 @@ const loadConfig = async () => {
       // 如果有配置，使用第一个（应该只有一个）
       currentConfig.value = configs[0]
       const configObj = JSON.parse(configs[0].json_data || '{}')
-      
-      // 解析配置
-      if (configObj.service && configObj.service.base_url) {
-        form.base_url = configObj.service.base_url
-      } else if (configObj.base_url) {
-        // 兼容旧格式
-        form.base_url = configObj.base_url
+
+      // 解析 service 配置
+      let mode = 'http'
+      if (configObj.service && typeof configObj.service === 'object') {
+        mode = normalizeMode(configObj.service.mode)
       }
+      form.mode = mode
+
+      // 解析服务地址
+      if (configObj.service && typeof configObj.service === 'object' && configObj.service.base_url) {
+        form.base_url = configObj.service.base_url
+      }
+
       // 读取阈值配置
       if (configObj.service && configObj.service.threshold !== undefined) {
         form.threshold = configObj.service.threshold
@@ -133,8 +178,9 @@ const loadConfig = async () => {
         // 默认值
         form.threshold = 0.4
       }
+
       // 开关对应 json_data.enable（业务启用），不使用接口返回的 enabled 列
-      form.enabled = configObj.enable !== undefined ? configObj.enable : true
+      form.enabled = typeof configObj.enable === 'boolean' ? configObj.enable : true
     }
   } catch (error) {
     ElMessage.error('加载配置失败')
@@ -151,11 +197,14 @@ const handleSave = async () => {
       saving.value = true
       try {
         // 构建配置数据：开关写入 json_data.enable，对外输出以该字段为准
+        const serviceConfig = {
+          mode: form.mode,
+          base_url: String(form.base_url || ''),
+          threshold: Number(form.threshold)
+        }
+
         const configData = {
-          service: {
-            base_url: form.base_url,
-            threshold: form.threshold
-          },
+          service: serviceConfig,
           enable: form.enabled
         }
         
@@ -188,6 +237,12 @@ const handleSave = async () => {
     }
   })
 }
+
+watch(() => form.mode, () => {
+  if (!isHttpMode.value && formRef.value) {
+    formRef.value.clearValidate(['base_url'])
+  }
+})
 
 onMounted(() => {
   loadConfig()

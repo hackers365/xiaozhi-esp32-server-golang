@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/mqtt_server"
@@ -50,20 +51,33 @@ func NewApp() *App {
 
 func (a *App) Run() {
 	go a.wsServer.Start()
-	log.Infof("enter Run, mqtt_server.enable: %v", viper.GetBool("mqtt_server.enable"))
-	if viper.GetBool("mqtt_server.enable") {
-		go func() {
-			err := a.startMqttServer()
-			if err != nil {
+	inlineMode := a.isInlineMode()
+	mqttServerEnabled := viper.GetBool("mqtt_server.enable")
+	log.Infof("enter Run, mqtt_server.enable: %v, mqtt.inline_mode: %v", mqttServerEnabled, inlineMode)
+	if mqttServerEnabled {
+		if inlineMode {
+			// inline 模式依赖 mqtt_server 实例，先同步启动避免与 adapter 启动竞态。
+			if err := a.startMqttServer(); err != nil {
 				log.Errorf("startMqttServer err: %+v", err)
 			}
-		}()
+		} else {
+			go func() {
+				err := a.startMqttServer()
+				if err != nil {
+					log.Errorf("startMqttServer err: %+v", err)
+				}
+			}()
+		}
+	} else if inlineMode {
+		log.Warn("mqtt.type=embed 但 mqtt_server.enable=false，inline 模式将无法建立连接")
 	}
 	a.mqttUdpMu.RLock()
 	adapter := a.mqttUdpAdapter
 	a.mqttUdpMu.RUnlock()
 	if adapter != nil {
-		go adapter.Start() // 非阻塞，连接与重试在 adapter 内部后台执行
+		if err := adapter.Start(); err != nil {
+			log.Errorf("adapter.Start err: %+v", err)
+		}
 	}
 
 	// 注册聊天相关的本地MCP工具
@@ -119,6 +133,13 @@ func (app *App) currentMqttConfig() *mqtt_udp.MqttConfig {
 	}
 }
 
+func (app *App) isInlineMode() bool {
+	if !viper.GetBool("mqtt.enable") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(viper.GetString("mqtt.type")), "embed")
+}
+
 func (app *App) newMqttUdpAdapter() (*mqtt_udp.MqttUdpAdapter, error) {
 	mqttConfig := app.currentMqttConfig()
 	if mqttConfig == nil {
@@ -168,6 +189,14 @@ func (app *App) ReloadMqttServer() {
 	}
 	if err := app.startMqttServer(); err != nil {
 		log.Errorf("ReloadMqttServer start: %v", err)
+		return
+	}
+	// inline 模式依赖 mqtt_server 进程内订阅，服务重启后需要重新建立订阅。
+	app.mqttUdpMu.RLock()
+	adapter := app.mqttUdpAdapter
+	app.mqttUdpMu.RUnlock()
+	if adapter != nil {
+		adapter.ReloadMqttClient(app.currentMqttConfig())
 	}
 }
 
@@ -192,7 +221,9 @@ func (app *App) ReloadMqttUdp() {
 	app.mqttUdpAdapter = adapter
 	app.mqttUdpMu.Unlock()
 	time.Sleep(500 * time.Millisecond)
-	go adapter.Start()
+	if err := adapter.Start(); err != nil {
+		log.Errorf("ReloadMqttUdp adapter.Start: %v", err)
+	}
 }
 
 // ReloadMqttUdpWithFlags 根据变更标记决定是否热更 MQTT+UDP
@@ -224,7 +255,9 @@ func (app *App) ReloadMqttUdpWithFlags(doMqttReload, doUdpReload bool) {
 		app.mqttUdpAdapter = newAdapter
 		app.mqttUdpMu.Unlock()
 		time.Sleep(500 * time.Millisecond)
-		go newAdapter.Start()
+		if err := newAdapter.Start(); err != nil {
+			log.Errorf("ReloadMqttUdpWithFlags adapter.Start: %v", err)
+		}
 		return
 	}
 

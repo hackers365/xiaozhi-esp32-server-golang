@@ -146,6 +146,9 @@ const form = reactive({
   provider: '',
   is_default: false,
   enabled: true,
+  embed: {
+    mode: 'offline'
+  },
   funasr: {
     host: 'localhost',
     port: 10095,
@@ -289,12 +292,20 @@ const editConfig = (config) => {
         funasrConfig.chunk_size = [5, 10, 5]
       }
       form.funasr = funasrConfig
+    } else if (configObj.embed) {
+      // 旧格式：包含provider层
+      form.embed = { ...form.embed, ...configObj.embed }
+      if (!form.embed.mode) form.embed.mode = 'offline'
     } else if (configObj.aliyun_funasr) {
       // 旧格式：包含provider层
       form.aliyun_funasr = { ...form.aliyun_funasr, ...configObj.aliyun_funasr }
     } else if (configObj.doubao) {
       // 旧格式：包含provider层
       form.doubao = { ...form.doubao, ...configObj.doubao }
+    } else if (config.provider === 'embed') {
+      // 新格式：直接包含配置内容
+      form.embed = { ...form.embed, ...configObj }
+      if (!form.embed.mode) form.embed.mode = 'offline'
     } else if (config.provider === 'funasr' && configObj.host) {
       // 新格式：直接包含配置内容
       const funasrConfig = { ...form.funasr, ...configObj }
@@ -526,6 +537,9 @@ const resetForm = () => {
   form.provider = ''
   form.is_default = false
   form.enabled = true
+  form.embed = {
+    mode: 'offline'
+  }
   form.funasr = {
     host: 'localhost',
     port: 10095,

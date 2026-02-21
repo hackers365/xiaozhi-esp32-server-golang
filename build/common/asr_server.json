@@ -41,7 +41,10 @@
     "use_inverse_text_normalization": false,
     "num_threads": 16,
     "provider": "cpu",
-    "debug": false
+    "debug": false,
+    "decode_mode": "pool",
+    "decode_pool_size": 4,
+    "decode_queue_size": 512
   },
   "speaker": {
     "enabled": true,

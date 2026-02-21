@@ -66,24 +66,38 @@
               <el-input v-model="form.name" placeholder="请输入配置名称" />
             </el-form-item>
             
-            <el-form-item label="Broker地址" prop="broker" class="form-item">
-              <el-input v-model="form.broker" placeholder="请输入MQTT Broker地址" />
-            </el-form-item>
-            
             <el-form-item label="连接类型" prop="type" class="form-item">
               <el-select v-model="form.type" placeholder="请选择连接类型" style="width: 100%">
+                <el-option label="Embed（内嵌）" value="embed" />
                 <el-option label="TCP" value="tcp" />
-                <el-option label="WebSocket" value="websocket" />
+                <el-option label="WebSocket (WS)" value="ws" />
+                <el-option label="WebSocket Secure (WSS)" value="wss" />
                 <el-option label="SSL/TLS" value="ssl" />
               </el-select>
             </el-form-item>
-            
-            <el-form-item label="端口" prop="port" class="form-item">
-              <el-input-number v-model="form.port" :min="1" :max="65535" placeholder="请输入端口号" style="width: 100%" />
+
+            <el-form-item v-if="!isEmbedType" label="Broker地址" prop="broker" class="form-item">
+              <el-input
+                v-model="form.broker"
+                placeholder="请输入MQTT Broker地址"
+              />
             </el-form-item>
             
-            <el-form-item label="客户端ID" prop="client_id" class="form-item">
-              <el-input v-model="form.client_id" placeholder="请输入客户端ID" />
+            <el-form-item v-if="!isEmbedType" label="端口" prop="port" class="form-item">
+              <el-input-number
+                v-model="form.port"
+                :min="1"
+                :max="65535"
+                placeholder="请输入端口号"
+                style="width: 100%"
+              />
+            </el-form-item>
+            
+            <el-form-item v-if="!isEmbedType" label="客户端ID" prop="client_id" class="form-item">
+              <el-input
+                v-model="form.client_id"
+                placeholder="请输入客户端ID"
+              />
             </el-form-item>
           </div>
         </el-card>
@@ -125,7 +139,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Connection, Setting, Link, User, QuestionFilled } from '@element-plus/icons-vue'
 import api from '@/utils/api'
@@ -134,24 +148,36 @@ const loading = ref(false)
 const saving = ref(false)
 const configId = ref(null)
 const formRef = ref()
+const EMBED_DEFAULT_BROKER = '127.0.0.1'
+const EMBED_DEFAULT_PORT = 1883
 
 const form = reactive({
   name: 'MQTT配置',
   is_default: true,
   enable: true,
-  broker: '',
-  type: 'tcp',
-  port: 1883,
+  broker: EMBED_DEFAULT_BROKER,
+  type: 'embed',
+  port: EMBED_DEFAULT_PORT,
   client_id: '',
   username: '',
   password: ''
 })
 
+const normalizeMqttType = (type) => {
+  const normalized = String(type || '').trim().toLowerCase()
+  if (!normalized) return 'embed'
+  if (normalized === 'websocket') return 'ws'
+  return normalized
+}
+
+const isEmbedType = computed(() => normalizeMqttType(form.type) === 'embed')
+
 const generateConfig = () => {
+  const mqttType = normalizeMqttType(form.type)
   return JSON.stringify({
     enable: form.enable,
-    broker: form.broker,
-    type: form.type,
+    broker: form.broker || EMBED_DEFAULT_BROKER,
+    type: mqttType,
     port: form.port,
     client_id: form.client_id,
     username: form.username,
@@ -159,15 +185,52 @@ const generateConfig = () => {
   })
 }
 
+const validateBroker = (rule, value, callback) => {
+  if (isEmbedType.value) {
+    callback()
+    return
+  }
+  if (!String(value || '').trim()) {
+    callback(new Error('请输入MQTT Broker地址'))
+    return
+  }
+  callback()
+}
+
+const validatePort = (rule, value, callback) => {
+  if (isEmbedType.value) {
+    callback()
+    return
+  }
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    callback(new Error('请输入端口号'))
+    return
+  }
+  if (value < 1 || value > 65535) {
+    callback(new Error('端口号必须在1-65535之间'))
+    return
+  }
+  callback()
+}
+
+const validateClientID = (rule, value, callback) => {
+  if (isEmbedType.value) {
+    callback()
+    return
+  }
+  if (!String(value || '').trim()) {
+    callback(new Error('请输入客户端ID'))
+    return
+  }
+  callback()
+}
+
 const rules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
-  broker: [{ required: true, message: '请输入MQTT Broker地址', trigger: 'blur' }],
+  broker: [{ validator: validateBroker, trigger: 'blur' }],
   type: [{ required: true, message: '请选择连接类型', trigger: 'change' }],
-  port: [
-    { required: true, message: '请输入端口号', trigger: 'blur' },
-    { type: 'number', min: 1, max: 65535, message: '端口号必须在1-65535之间', trigger: 'blur' }
-  ],
-  client_id: [{ required: true, message: '请输入客户端ID', trigger: 'blur' }]
+  port: [{ validator: validatePort, trigger: 'blur' }],
+  client_id: [{ validator: validateClientID, trigger: 'blur' }]
 }
 
 const loadConfig = async () => {
@@ -190,10 +253,11 @@ const loadConfig = async () => {
       try {
         const configData = JSON.parse(config.json_data || '{}')
         console.log('解析的配置数据:', configData)
-        form.enable = configData.enable || true
-        form.broker = configData.broker || ''
-        form.type = configData.type || 'tcp'
-        form.port = configData.port || 1883
+        const parsedType = normalizeMqttType(configData.type)
+        form.enable = configData.enable !== undefined ? configData.enable : true
+        form.broker = configData.broker || EMBED_DEFAULT_BROKER
+        form.type = parsedType
+        form.port = Number(configData.port) || EMBED_DEFAULT_PORT
         form.client_id = configData.client_id || ''
         form.username = configData.username || ''
         form.password = configData.password || ''
@@ -247,6 +311,25 @@ const handleSave = async () => {
     }
   })
 }
+
+watch(() => form.type, (newType) => {
+  const normalized = normalizeMqttType(newType)
+  if (newType !== normalized) {
+    form.type = normalized
+    return
+  }
+
+  if (normalized === 'embed') {
+    if (!form.broker) {
+      form.broker = EMBED_DEFAULT_BROKER
+    }
+    if (!form.port) {
+      form.port = EMBED_DEFAULT_PORT
+    }
+  }
+
+  formRef.value?.clearValidate(['broker', 'port', 'client_id'])
+})
 
 onMounted(() => {
   loadConfig()

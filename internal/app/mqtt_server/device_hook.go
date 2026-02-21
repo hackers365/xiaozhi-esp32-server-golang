@@ -64,7 +64,7 @@ func (h *DeviceHook) OnDisconnect(cl *mqttServer.Client, err error, ok bool) {
 	}
 	mac := parseMacFromClientId(cl.ID)
 	if mac == "" {
-		log.Info("警告: 无法从客户端ID解析MAC地址:", cl.ID)
+		warnMacParseFailure(cl)
 		return
 	}
 	topic := fmt.Sprintf("%s%s", client.MDeviceSubTopicPrefix, mac)
@@ -83,7 +83,7 @@ func (h *DeviceHook) OnSessionEstablished(cl *mqttServer.Client, pk packets.Pack
 		return // 超级管理员不做限制
 	}
 	if mac == "" {
-		log.Info("警告: 无法从客户端ID解析MAC地址:", cl.ID)
+		warnMacParseFailure(cl)
 		return
 	}
 
@@ -145,7 +145,7 @@ func (h *DeviceHook) OnPublish(cl *mqttServer.Client, pk packets.Packet) (packet
 	//从cl中找到mac地址
 	mac := parseMacFromClientId(cl.ID)
 	if mac == "" {
-		log.Info("警告: 无法从客户端ID解析MAC地址:", cl.ID)
+		warnMacParseFailure(cl)
 		return pk, nil
 	}
 	forwardTopic := fmt.Sprintf("%s%s", client.MDevicePubTopicPrefix, mac)
@@ -158,7 +158,30 @@ func (h *DeviceHook) OnPublish(cl *mqttServer.Client, pk packets.Packet) (packet
 
 // 判断是否超级管理员
 func isAdminUser(cl *mqttServer.Client) bool {
+	if cl == nil {
+		return false
+	}
 	return string(cl.Properties.Username) == "admin"
+}
+
+// 判断是否内联客户端（由服务端内部直接发布/订阅使用）
+func isInlineClient(cl *mqttServer.Client) bool {
+	if cl == nil {
+		return false
+	}
+	return cl.Net.Inline || cl.ID == mqttServer.InlineClientId
+}
+
+// 对无法解析 MAC 的客户端打印告警；内联客户端属于系统客户端，忽略该告警。
+func warnMacParseFailure(cl *mqttServer.Client) {
+	if isInlineClient(cl) {
+		return
+	}
+	if cl == nil {
+		log.Warn("无法从客户端ID解析MAC地址: <nil>")
+		return
+	}
+	log.Warnf("无法从客户端ID解析MAC地址: %s", cl.ID)
 }
 
 // 解析 clientId，获取 mac 地址

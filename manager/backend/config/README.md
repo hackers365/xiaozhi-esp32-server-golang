@@ -25,9 +25,27 @@
   "jwt": {
     "secret": "your_secret_key", // JWT签名密钥
     "expire_hour": 24           // Token过期时间(小时)
+  },
+  "speaker_service": {
+    "url": "http://127.0.0.1:9000", // 声纹服务地址（http模式）
+    "mode": "http"                  // 调用模式: http/embed
   }
 }
 ```
+
+### `speaker_service` 说明
+
+- `speaker_service.mode`：Manager 后台调用声纹服务的模式
+  - `http`：通过 HTTP 请求 voice-server
+  - `embed`：进程内调用（需按项目说明启用对应编译条件）
+- `speaker_service.url`：当 `mode=http` 时必填
+
+### 环境变量覆盖
+
+- `SPEAKER_SERVICE_URL`：覆盖 `speaker_service.url`
+- `SPEAKER_SERVICE_MODE`：覆盖 `speaker_service.mode`
+
+说明：以上覆盖仅针对 Manager 后台配置读取，不会替代主服务的 `voice_identify` 运行时配置职责。
 
 ## 使用方法
 

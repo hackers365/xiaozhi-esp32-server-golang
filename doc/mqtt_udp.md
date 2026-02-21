@@ -56,6 +56,7 @@ flowchart TD
 ## 2. 配置文件设置
 在 `config/config.yaml` 中，需关注以下参数：
 - `mqtt`：**客户端角色**，用于配置本服务作为 MQTT 客户端连接到 Broker（无论是内置还是外部 Broker）。
+  - 推荐内置模式使用 `type: embed`（进程内直连 `mqtt_server`，不走网络）。
   - `broker`、`type`、`port`、`client_id`、`username`、`password`
 - `mqtt_server`：内置 MQTT 服务端参数（仅主程序内置时需启用）
   - `enable`、`listen_host`、`listen_port`、`tls` 等
@@ -115,7 +116,7 @@ OTA（Over-the-Air）配置用于设备远程获取服务器、MQTT、WebSocket�
 ```yaml
 mqtt:
   broker: "127.0.0.1"
-  type: "tcp"
+  type: "embed"
   port: 2883
   client_id: "xiaozhi_server"
   username: "admin"

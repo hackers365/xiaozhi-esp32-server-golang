@@ -1,5 +1,5 @@
 <template>
-  <el-form ref="formRef" :model="model" :rules="rules" label-width="120px">
+  <el-form ref="formRef" :model="model" :rules="rules" label-width="140px">
     <el-form-item label="提供商" prop="provider">
       <el-select v-model="model.provider" placeholder="请选择提供商" style="width: 100%">
         <el-option
@@ -9,6 +9,12 @@
           :value="provider.value"
         />
       </el-select>
+      <div v-if="currentProviderMeta.docUrl" class="form-link-tip">
+        文档地址：
+        <el-link :href="currentProviderMeta.docUrl" target="_blank" type="primary">
+          {{ currentProviderMeta.docUrl }}
+        </el-link>
+      </div>
     </el-form-item>
     <el-form-item label="配置名称" prop="name">
       <el-input v-model="model.name" placeholder="请输入配置名称" />
@@ -23,6 +29,12 @@
       </el-form-item>
       <el-form-item label="访问令牌" prop="doubao_ws.access_token">
         <el-input v-model="model.doubao_ws.access_token" placeholder="请输入访问令牌" type="password" show-password />
+        <div v-if="currentProviderMeta.keyUrl" class="form-link-tip">
+           获取密钥：
+          <el-link :href="currentProviderMeta.keyUrl" target="_blank" type="primary">
+            {{ currentProviderMeta.keyUrl }}
+          </el-link>
+        </div>
       </el-form-item>
       <el-form-item label="集群" prop="doubao_ws.cluster">
         <el-input v-model="model.doubao_ws.cluster" placeholder="请输入集群名称" />
@@ -102,6 +114,12 @@
     <template v-if="model.provider === 'aliyun_qwen'">
       <el-form-item label="API Key" prop="qwen_tts.api_key">
         <el-input v-model="model.qwen_tts.api_key" placeholder="请输入API Key" type="password" show-password />
+        <div v-if="currentProviderMeta.keyUrl" class="form-link-tip">
+           获取密钥：
+          <el-link :href="currentProviderMeta.keyUrl" target="_blank" type="primary">
+            {{ currentProviderMeta.keyUrl }}
+          </el-link>
+        </div>
       </el-form-item>
       <el-form-item label="地域" prop="qwen_tts.region">
         <el-select v-model="model.qwen_tts.region" placeholder="请选择地域" style="width: 100%">
@@ -133,6 +151,12 @@
     <template v-if="model.provider === 'zhipu'">
       <el-form-item label="API Key" prop="zhipu.api_key">
         <el-input v-model="model.zhipu.api_key" placeholder="请输入API Key" type="password" show-password />
+        <div v-if="currentProviderMeta.keyUrl" class="form-link-tip">
+           获取密钥：
+          <el-link :href="currentProviderMeta.keyUrl" target="_blank" type="primary">
+            {{ currentProviderMeta.keyUrl }}
+          </el-link>
+        </div>
       </el-form-item>
       <el-form-item label="API URL" prop="zhipu.api_url">
         <el-input v-model="model.zhipu.api_url" placeholder="https://open.bigmodel.cn/api/paas/v4/audio/speech" />
@@ -181,6 +205,12 @@
     <template v-if="model.provider === 'minimax'">
       <el-form-item label="API Key" prop="minimax.api_key">
         <el-input v-model="model.minimax.api_key" placeholder="请输入API Key" type="password" show-password />
+        <div v-if="currentProviderMeta.keyUrl" class="form-link-tip">
+           获取密钥：
+          <el-link :href="currentProviderMeta.keyUrl" target="_blank" type="primary">
+            {{ currentProviderMeta.keyUrl }}
+          </el-link>
+        </div>
       </el-form-item>
       <el-form-item label="模型" prop="minimax.model">
         <el-input v-model="model.minimax.model" placeholder="speech-2.8-hd" />
@@ -229,6 +259,12 @@
     <template v-if="model.provider === 'openai'">
       <el-form-item label="API Key" prop="openai.api_key">
         <el-input v-model="model.openai.api_key" placeholder="请输入API Key" type="password" show-password />
+        <div v-if="currentProviderMeta.keyUrl" class="form-link-tip">
+           获取密钥：
+          <el-link :href="currentProviderMeta.keyUrl" target="_blank" type="primary">
+            {{ currentProviderMeta.keyUrl }}
+          </el-link>
+        </div>
       </el-form-item>
       <el-form-item label="API URL" prop="openai.api_url">
         <el-input v-model="model.openai.api_url" placeholder="请输入API URL（默认：https://api.openai.com/v1/audio/speech）" />
@@ -300,6 +336,37 @@
 import { ref, computed } from 'vue'
 import { TTS_PROVIDER_OPTIONS } from './ttsProviderOptions'
 
+const providerMeta = {
+  doubao_ws: {
+    docUrl: 'https://www.volcengine.com/docs/6561/1257543',
+    keyUrl: 'https://www.volcengine.com/docs/6561/196768#q1：哪里可以获取到以下参数appid，cluster，token，authorization-type，secret-key-？'
+  },
+  edge: {
+    docUrl: 'https://github.com/rany2/edge-tts',
+    keyUrl: ''
+  },
+  edge_offline: {
+    docUrl: 'https://github.com/rany2/edge-tts',
+    keyUrl: ''
+  },
+  openai: {
+    docUrl: 'https://platform.openai.com/docs/guides/text-to-speech',
+    keyUrl: 'https://platform.openai.com/api-keys'
+  },
+  aliyun_qwen: {
+    docUrl: 'https://help.aliyun.com/zh/model-studio/',
+    keyUrl: 'https://help.aliyun.com/zh/model-studio/get-api-key'
+  },
+  zhipu: {
+    docUrl: 'https://open.bigmodel.cn/dev/api',
+    keyUrl: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys'
+  },
+  minimax: {
+    docUrl: 'https://platform.minimaxi.com/docs/guides/speech-t2a-websocket',
+    keyUrl: 'https://platform.minimaxi.com/user-center/basic-information/interface-key'
+  }
+}
+
 const props = defineProps({
   model: { type: Object, required: true },
   rules: { type: Object, default: () => ({}) },
@@ -308,6 +375,7 @@ const props = defineProps({
 })
 
 const formRef = ref()
+const currentProviderMeta = computed(() => providerMeta[props.model?.provider] || {})
 // 保证音色选项始终为数组且响应式，供下拉使用
 const voiceOptionsList = computed(() => Array.isArray(props.voiceOptions) ? props.voiceOptions : [])
 
@@ -407,3 +475,17 @@ function resetFields() {
 
 defineExpose({ validate, getJsonData, resetFields })
 </script>
+
+<style scoped>
+:deep(.el-form-item__label) {
+  white-space: nowrap;
+}
+
+.form-link-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.4;
+  word-break: break-all;
+}
+</style>

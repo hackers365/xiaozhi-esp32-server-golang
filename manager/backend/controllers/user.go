@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"xiaozhi/manager/backend/buildinfo"
 	"xiaozhi/manager/backend/models"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,8 @@ type UserController struct {
 		RequestDeviceMcpToolDetailsFromClient(ctx context.Context, deviceID string) ([]MCPTool, error)
 		CallMcpToolFromClient(ctx context.Context, body map[string]interface{}) (map[string]interface{}, error)
 		InjectMessageToDevice(ctx context.Context, deviceID, message string, skipLlm bool) error
+		GetFirstConnectedClientUUID() string
+		RequestServerInfoFromClient(ctx context.Context, uuid string) (*WebSocketResponse, error)
 	}
 }
 
@@ -75,6 +78,113 @@ func normalizeMemoryMode(mode string) string {
 	default:
 		return "short"
 	}
+}
+
+type SystemRuntimeInfo struct {
+	Name          string `json:"name"`
+	Version       string `json:"version"`
+	Commit        string `json:"commit,omitempty"`
+	BuildTime     string `json:"buildTime,omitempty"`
+	StartedAt     string `json:"startedAt,omitempty"`
+	Uptime        string `json:"uptime"`
+	UptimeSeconds int64  `json:"uptimeSeconds"`
+}
+
+func buildManagerRuntimeInfo() SystemRuntimeInfo {
+	uptimeSeconds := buildinfo.UptimeSeconds()
+	return SystemRuntimeInfo{
+		Name:          "xiaozhi-manager-backend",
+		Version:       buildinfo.Version,
+		Commit:        buildinfo.Commit,
+		BuildTime:     buildinfo.BuildTime,
+		StartedAt:     buildinfo.StartedAtRFC3339(),
+		Uptime:        buildinfo.UptimeText(uptimeSeconds),
+		UptimeSeconds: uptimeSeconds,
+	}
+}
+
+func parseStringValue(v interface{}) string {
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+func parseInt64Value(v interface{}) int64 {
+	switch n := v.(type) {
+	case int:
+		return int64(n)
+	case int8:
+		return int64(n)
+	case int16:
+		return int64(n)
+	case int32:
+		return int64(n)
+	case int64:
+		return n
+	case uint:
+		return int64(n)
+	case uint8:
+		return int64(n)
+	case uint16:
+		return int64(n)
+	case uint32:
+		return int64(n)
+	case uint64:
+		if n > uint64(^uint64(0)>>1) {
+			return int64(^uint64(0) >> 1)
+		}
+		return int64(n)
+	case float32:
+		return int64(n)
+	case float64:
+		return int64(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			return i
+		}
+		if f, err := n.Float64(); err == nil {
+			return int64(f)
+		}
+	case string:
+		if i, err := strconv.ParseInt(strings.TrimSpace(n), 10, 64); err == nil {
+			return i
+		}
+	}
+	return 0
+}
+
+func parseServerRuntimeInfo(body map[string]interface{}) *SystemRuntimeInfo {
+	if body == nil {
+		return nil
+	}
+	info := &SystemRuntimeInfo{
+		Name:    "xiaozhi-server",
+		Version: "unknown",
+	}
+	if name := parseStringValue(body["server_name"]); name != "" {
+		info.Name = name
+	}
+	if version := parseStringValue(body["version"]); version != "" {
+		info.Version = version
+	}
+	info.Commit = parseStringValue(body["commit"])
+	info.BuildTime = parseStringValue(body["build_time"])
+	info.StartedAt = parseStringValue(body["started_at"])
+	info.UptimeSeconds = parseInt64Value(body["uptime_seconds"])
+
+	uptimeText := parseStringValue(body["uptime"])
+	if uptimeText == "" {
+		uptimeText = buildinfo.UptimeText(info.UptimeSeconds)
+	}
+	if info.UptimeSeconds <= 0 && info.StartedAt == "" {
+		if _, err := time.Parse(time.RFC3339, uptimeText); err == nil {
+			uptimeText = "未知"
+		}
+	}
+	info.Uptime = uptimeText
+	return info
 }
 
 // 注入消息到设备
@@ -844,10 +954,12 @@ func (uc *UserController) GetDashboardStats(c *gin.Context) {
 	userRole, _ := c.Get("role")
 
 	type DashboardStats struct {
-		TotalUsers    int64 `json:"totalUsers"`
-		TotalDevices  int64 `json:"totalDevices"`
-		TotalAgents   int64 `json:"totalAgents"`
-		OnlineDevices int64 `json:"onlineDevices"`
+		TotalUsers    int64              `json:"totalUsers"`
+		TotalDevices  int64              `json:"totalDevices"`
+		TotalAgents   int64              `json:"totalAgents"`
+		OnlineDevices int64              `json:"onlineDevices"`
+		Manager       SystemRuntimeInfo  `json:"manager"`
+		Server        *SystemRuntimeInfo `json:"server,omitempty"`
 	}
 
 	stats := DashboardStats{}
@@ -868,6 +980,21 @@ func (uc *UserController) GetDashboardStats(c *gin.Context) {
 		// 在线设备：用户自己的最近5分钟内活跃的设备
 		fiveMinutesAgo := time.Now().Add(-5 * time.Minute)
 		uc.DB.Model(&models.Device{}).Where("user_id = ? AND last_active_at > ?", userID, fiveMinutesAgo).Count(&stats.OnlineDevices)
+	}
+
+	stats.Manager = buildManagerRuntimeInfo()
+	if uc.WebSocketController != nil {
+		clientUUID := uc.WebSocketController.GetFirstConnectedClientUUID()
+		if clientUUID != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			resp, err := uc.WebSocketController.RequestServerInfoFromClient(ctx, clientUUID)
+			if err != nil {
+				log.Printf("获取主服务运行信息失败: %v", err)
+			} else if resp != nil && resp.Status == http.StatusOK {
+				stats.Server = parseServerRuntimeInfo(resp.Body)
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, stats)

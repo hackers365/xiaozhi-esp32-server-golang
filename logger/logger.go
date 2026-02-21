@@ -17,6 +17,8 @@ const (
 func init() {
 	// 不设置默认输出，由应用程序决定
 	log.SetFormatter(Formatter(false)) // 默认不使用颜色
+	// 默认输出到标准输出，避免启动早期日志写入 stderr 导致控制台显示为红色
+	log.SetOutput(os.Stdout)
 }
 
 // SetOutput 设置日志输出目标

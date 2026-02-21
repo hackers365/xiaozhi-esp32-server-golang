@@ -2,6 +2,7 @@
   <el-form ref="formRef" :model="model" :rules="rules" label-width="120px">
     <el-form-item label="提供商" prop="provider">
       <el-select v-model="model.provider" placeholder="请选择提供商" style="width: 100%" @change="onProviderChange">
+        <el-option label="Embed（内嵌）" value="embed" />
         <el-option label="FunASR" value="funasr" />
         <el-option label="Aliyun FunASR" value="aliyun_funasr" />
         <el-option label="豆包" value="doubao" />
@@ -208,6 +209,7 @@ function onProviderChange() {
 
 function getJsonData() {
   const m = props.model
+  if (m.provider === 'embed') return '{}'
   if (m.provider === 'funasr') return JSON.stringify(m.funasr || {})
   if (m.provider === 'aliyun_funasr') return JSON.stringify(m.aliyun_funasr || {})
   if (m.provider === 'doubao') return JSON.stringify(m.doubao || {})

@@ -73,10 +73,10 @@ websocket:
   host: "0.0.0.0"
   port: 8989
 
-# 外部MQTT服务器连接参数（要连接的mqtt服务器地址，如果下边mqtt_server为true时，可以设置为本机）
+# MQTT客户端连接参数（type=embed 时进程内直连 mqtt_server；否则连接外部 Broker）
 mqtt:
   broker: "127.0.0.1"      # mqtt 服务器地址
-  type: "tcp"              # 类型tcp或ssl
+  type: "embed"            # 类型：embed / tcp / ssl / ws / wss
   port: 2883
   client_id: "xiaozhi_server"
   username: "admin"        # 用户名

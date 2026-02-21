@@ -8,8 +8,6 @@ import (
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 
 	log "xiaozhi-esp32-server-golang/logger"
-
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 const (
@@ -25,9 +23,9 @@ type MqttUdpConn struct {
 
 	DeviceId string
 
-	PubTopic   string
-	MqttClient mqtt.Client
-	udpServer  *UdpServer
+	PubTopic  string
+	publisher mqttPublisher
+	udpServer *UdpServer
 
 	UdpSession *UdpSession
 
@@ -42,7 +40,7 @@ type MqttUdpConn struct {
 }
 
 // NewMqttUdpConn 创建一个新的 MqttUdpConn 实例
-func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, udpServer *UdpServer, udpSession *UdpSession) *MqttUdpConn {
+func NewMqttUdpConn(deviceID string, pubTopic string, publisher mqttPublisher, udpServer *UdpServer, udpSession *UdpSession) *MqttUdpConn {
 	ctx, cancel := context.WithCancel(context.Background())
 	log.Log().Debugf("NewMqttUdpConn pubTopic: %s", pubTopic)
 	return &MqttUdpConn{
@@ -51,7 +49,7 @@ func NewMqttUdpConn(deviceID string, pubTopic string, mqttClient mqtt.Client, ud
 		DeviceId: deviceID,
 
 		PubTopic:   pubTopic,
-		MqttClient: mqttClient,
+		publisher:  publisher,
 		udpServer:  udpServer,
 		UdpSession: udpSession,
 
@@ -66,17 +64,12 @@ func (c *MqttUdpConn) SendCmd(msg []byte) error {
 	//log.Debugf("mqtt udp conn send cmd, topic: %s, msg: %s", c.PubTopic, string(msg))
 	c.lastActiveTs = time.Now().Unix()
 	c.RLock()
-	client := c.MqttClient
+	publisher := c.publisher
 	c.RUnlock()
-	if client == nil {
-		return errors.New("mqtt client is nil")
+	if publisher == nil {
+		return errors.New("mqtt publisher is nil")
 	}
-	token := client.Publish(c.PubTopic, 0, false, msg)
-	token.Wait()
-	if token.Error() != nil {
-		return token.Error()
-	}
-	return nil
+	return publisher.Publish(c.PubTopic, msg)
 }
 
 func (c *MqttUdpConn) PushMsgToRecvCmd(msg []byte) error {
@@ -157,9 +150,9 @@ func (c *MqttUdpConn) OnClose(closeCb func(deviceId string)) {
 	c.onCloseCbList = append(c.onCloseCbList, closeCb)
 }
 
-func (c *MqttUdpConn) SetMqttClient(client mqtt.Client) {
+func (c *MqttUdpConn) SetPublisher(publisher mqttPublisher) {
 	c.Lock()
-	c.MqttClient = client
+	c.publisher = publisher
 	c.Unlock()
 }
 
