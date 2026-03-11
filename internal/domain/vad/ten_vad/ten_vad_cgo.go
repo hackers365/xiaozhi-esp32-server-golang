@@ -5,8 +5,8 @@ package ten_vad
 // #cgo LDFLAGS: -lm
 // #cgo windows,amd64 LDFLAGS: -L${SRCDIR}/../../../../lib/ten-vad/lib/Windows/x64 -lten_vad
 // #cgo linux,amd64   LDFLAGS: -L${SRCDIR}/../../../../lib/ten-vad/lib/Linux/x64 -lten_vad -lc++ -lc++abi
-// #cgo darwin,amd64  LDFLAGS: -F${SRCDIR}/../../../../lib/ten-vad/lib/macOS -framework ten_vad
-// #cgo darwin,arm64  LDFLAGS: -F${SRCDIR}/../../../../lib/ten-vad/lib/macOS -framework ten_vad
+// #cgo darwin,amd64  LDFLAGS: -F${SRCDIR}/../../../../lib/ten-vad/lib/macOS -framework ten_vad -Wl,-rpath,${SRCDIR}/../../../../lib/ten-vad/lib/macOS
+// #cgo darwin,arm64  LDFLAGS: -F${SRCDIR}/../../../../lib/ten-vad/lib/macOS -framework ten_vad -Wl,-rpath,${SRCDIR}/../../../../lib/ten-vad/lib/macOS
 // #cgo windows,amd64 CFLAGS:  -I${SRCDIR}/../../../../lib/ten-vad/include
 // #cgo linux,amd64   CFLAGS:  -I${SRCDIR}/../../../../lib/ten-vad/include
 // #cgo darwin,amd64  CFLAGS:  -I${SRCDIR}/../../../../lib/ten-vad/include -F${SRCDIR}/../../../../lib/ten-vad/lib/macOS

@@ -47,9 +47,18 @@ brew install pkg-config
 # 添加执行权限
 chmod +x xiaozhi_server
 
+# 如果这是你自己构建的发布包，先修正 rpath
+./build/macos/fix_rpath.sh ./xiaozhi_server
+
 # 启动服务
 ./xiaozhi_server
 ```
+
+说明：
+
+- 官方发布包如果已经完成打包，一般不需要再次执行 `fix_rpath.sh`
+- 只有你在源码仓库里自行构建 macOS 分发包时，才需要补这一步
+- 这一步会把二进制里的开发机绝对路径 `rpath` 改成 `@executable_path/ten-vad/lib/macOS`
 
 ### 首次运行安全提示
 
@@ -200,8 +209,23 @@ xattr -cr xiaozhi_server
 # 查看依赖
 otool -L xiaozhi_server
 
+# 查看 rpath
+otool -l xiaozhi_server | grep -A2 LC_RPATH
+
 # 确保动态库在正确位置
 ls -la ten-vad/lib/macOS/
+```
+
+如果 `LC_RPATH` 仍然是开发机源码绝对路径，而不是 `@executable_path/ten-vad/lib/macOS`，请执行：
+
+```bash
+./build/macos/fix_rpath.sh ./xiaozhi_server
+```
+
+如果你是在 IDE 临时目录调试，或手动移动了二进制导致目录结构不一致，可临时使用：
+
+```bash
+DYLD_FRAMEWORK_PATH="$PWD/ten-vad/lib/macOS" ./xiaozhi_server
 ```
 
 ### 端口被占用
