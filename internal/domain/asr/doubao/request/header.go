@@ -61,11 +61,11 @@ func DefaultHeader() *AsrRequestHeader {
 	}
 }
 
-func NewAuthHeader(appKey, accessKey string) http.Header {
+func NewAuthHeader(appKey, accessKey, resourceID string) http.Header {
 	reqid := uuid.New().String()
 	header := http.Header{}
 
-	header.Add("X-Api-Resource-Id", "volc.bigasr.sauc.duration")
+	header.Add("X-Api-Resource-Id", resourceID)
 	header.Add("X-Api-Request-Id", reqid)
 	header.Add("X-Api-Access-Key", accessKey)
 	header.Add("X-Api-App-Key", appKey)

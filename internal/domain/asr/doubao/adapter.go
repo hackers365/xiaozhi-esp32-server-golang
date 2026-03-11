@@ -29,6 +29,9 @@ func NewDoubaoV2Adapter(config map[string]interface{}) (*DoubaoV2Adapter, error)
 	if wsURL, ok := config["ws_url"].(string); ok && wsURL != "" {
 		doubaoConfig.WsURL = wsURL
 	}
+	if resourceID, ok := config["resource_id"].(string); ok && resourceID != "" {
+		doubaoConfig.ResourceID = resourceID
+	}
 	if modelName, ok := config["model_name"].(string); ok && modelName != "" {
 		doubaoConfig.ModelName = modelName
 	}

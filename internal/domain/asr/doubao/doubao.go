@@ -43,6 +43,9 @@ func NewDoubaoV2ASR(config DoubaoV2Config) (*DoubaoV2ASR, error) {
 	if config.WsURL == "" {
 		config.WsURL = DefaultConfig.WsURL
 	}
+	if config.ResourceID == "" {
+		config.ResourceID = DefaultConfig.ResourceID
+	}
 	if config.ModelName == "" {
 		config.ModelName = DefaultConfig.ModelName
 	}
@@ -68,7 +71,7 @@ func NewDoubaoV2ASR(config DoubaoV2Config) (*DoubaoV2ASR, error) {
 // 注意：连接将在收到第一个音频包时延迟建立，避免因VAD延迟导致服务端超时
 func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream <-chan []float32) (chan types.StreamingResult, error) {
 	// 创建客户端实例（不立即建立连接）
-	d.c = client.NewAsrWsClient(d.config.WsURL, d.config.AppID, d.config.AccessToken)
+	d.c = client.NewAsrWsClient(d.config.WsURL, d.config.AppID, d.config.AccessToken, d.config.ResourceID)
 
 	// 豆包返回的识别结果
 	doubaoResultChan := make(chan *response.AsrResponse, 10)
@@ -77,7 +80,19 @@ func (d *DoubaoV2ASR) StreamingRecognize(ctx context.Context, audioStream <-chan
 
 	// 启动音频流处理（连接将在第一个音频包到达时建立）
 	go func() {
-		d.c.StartAudioStream(ctx, audioStream, doubaoResultChan)
+		defer close(doubaoResultChan)
+		if err := d.c.StartAudioStream(ctx, audioStream, doubaoResultChan); err != nil {
+			payload := &response.AsrResponsePayload{}
+			payload.Error = err.Error()
+			select {
+			case <-ctx.Done():
+			case doubaoResultChan <- &response.AsrResponse{
+				Code:          -1,
+				IsLastPackage: true,
+				PayloadMsg:    payload,
+			}:
+			}
+		}
 	}()
 
 	// 启动结果接收goroutine
@@ -102,10 +117,13 @@ func (d *DoubaoV2ASR) receiveStreamResults(ctx context.Context, resultChan chan 
 		case result, ok := <-asrResponseChan:
 			if !ok {
 				log.Debugf("receiveStreamResults asrResponseChan 已关闭")
-				// 静音情况：连接未建立，asrResponseChan 被关闭，直接返回
 				return
 			}
 			if result.Code != 0 {
+				errMsg := fmt.Sprintf("asr response code: %d", result.Code)
+				if result.PayloadMsg != nil && result.PayloadMsg.Error != "" {
+					errMsg = result.PayloadMsg.Error
+				}
 				// 使用 select 避免向已关闭的 channel 发送（如果 ctx 已取消，优先选择 ctx.Done()）
 				select {
 				case <-ctx.Done():
@@ -114,7 +132,7 @@ func (d *DoubaoV2ASR) receiveStreamResults(ctx context.Context, resultChan chan 
 				case resultChan <- types.StreamingResult{
 					Text:    "",
 					IsFinal: true,
-					Error:   fmt.Errorf("asr response code: %d", result.Code),
+					Error:   fmt.Errorf("%s", errMsg),
 				}:
 				}
 				return
