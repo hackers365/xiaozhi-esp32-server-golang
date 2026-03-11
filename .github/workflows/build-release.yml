@@ -191,7 +191,8 @@ jobs:
           # Copy all sherpa dylibs, including versioned files like libonnxruntime.1.17.1.dylib.
           cp "$SHERPA_LIB_DIR"/*.dylib "$PACK_DIR/ten-vad/lib/macOS/"
           chmod +x "$PACK_DIR/xiaozhi_server"
-          install_name_tool -add_rpath "@executable_path/ten-vad/lib/macOS" "$PACK_DIR/xiaozhi_server" || true
+          chmod +x ./build/macos/fix_rpath.sh
+          ./build/macos/fix_rpath.sh "$PACK_DIR/xiaozhi_server"
           otool -L "$PACK_DIR/xiaozhi_server" | grep -E "libonnxruntime|libsherpa-onnx" || true
 
           rm -rf "out/xiaozhi_server-macos-${ARCH}-${VERSION}"
