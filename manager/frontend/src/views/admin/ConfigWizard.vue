@@ -168,6 +168,7 @@ import VADConfigForm from './forms/VADConfigForm.vue'
 import ASRConfigForm from './forms/ASRConfigForm.vue'
 import LLMConfigForm from './forms/LLMConfigForm.vue'
 import TTSConfigForm from './forms/TTSConfigForm.vue'
+import { getProviderFixedType, isProviderBaseURLEditable, resolveLLMProvider } from './forms/llmCatalog'
 
 const currentStep = ref(0)
 const saving = ref(false)
@@ -257,6 +258,7 @@ const asrForm = reactive({
     appid: '',
     access_token: '',
     ws_url: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream',
+    resource_id: 'volc.bigasr.sauc.duration',
     model_name: 'bigmodel',
     end_window_size: 800,
     enable_punc: true,
@@ -313,7 +315,7 @@ const asrFormRules = {
   'doubao.appid': [{ required: true, message: '请输入应用ID', trigger: 'blur' }],
   'doubao.access_token': [{ required: true, message: '请输入访问令牌', trigger: 'blur' }],
   'doubao.ws_url': [{ required: true, message: '请输入WebSocket URL', trigger: 'blur' }],
-  'doubao.model_name': [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
+  'doubao.resource_id': [{ required: true, message: '请选择资源规格', trigger: 'change' }],
   'aliyun_qwen3.ws_url': [{ required: true, message: '请输入WS URL', trigger: 'blur' }],
   'aliyun_qwen3.model': [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
   'aliyun_qwen3.format': [{ required: true, message: '请选择音频格式', trigger: 'change' }],
@@ -332,18 +334,67 @@ const llmForm = reactive({
   base_url: 'https://api.openai.com/v1',
   max_tokens: 4000,
   temperature: 0.7,
-  top_p: 0.9
+  top_p: 0.9,
+  thinking_mode: 'default',
+  thinking_budget_tokens: null,
+  thinking_effort: 'medium',
+  thinking_clear_thinking: 'default'
 })
 const llmFormRef = ref()
 const llmFormRules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
   config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
-  provider: [{ required: false }],
-  type: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
-  model_name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
-  api_key: [{ required: true, message: '请输入API密钥', trigger: 'blur' }],
-  base_url: [{ required: true, message: '请输入基础URL', trigger: 'blur' }],
-  max_tokens: [{ required: true, message: '请输入max_tokens', trigger: 'blur' }]
+  provider: [{ required: true, message: '请选择提供商', trigger: 'change' }],
+  model_name: [{
+    required: true,
+    message: '请输入模型名称',
+    trigger: 'change'
+  }, {
+    validator: (_, value, callback) => {
+      const provider = resolveLLMProvider(llmForm.provider, llmForm.type)
+      const providerType = getProviderFixedType(provider)
+      if ((providerType === 'openai' || providerType === 'ollama') && !value) {
+        callback(new Error('请输入模型名称'))
+        return
+      }
+      callback()
+    },
+    trigger: 'change'
+  }],
+  api_key: [{
+    validator: (_, value, callback) => {
+      const provider = resolveLLMProvider(llmForm.provider, llmForm.type)
+      if (getProviderFixedType(provider) !== 'ollama' && !value) {
+        callback(new Error('请输入API密钥'))
+        return
+      }
+      callback()
+    },
+    trigger: 'blur'
+  }],
+  base_url: [{
+    validator: (_, value, callback) => {
+      const provider = resolveLLMProvider(llmForm.provider, llmForm.type)
+      if (isProviderBaseURLEditable(provider) && !value) {
+        callback(new Error('请输入基础URL'))
+        return
+      }
+      callback()
+    },
+    trigger: 'blur'
+  }],
+  max_tokens: [{
+    validator: (_, value, callback) => {
+      const provider = resolveLLMProvider(llmForm.provider, llmForm.type)
+      const providerType = getProviderFixedType(provider)
+      if ((providerType === 'openai' || providerType === 'ollama') && (!value || Number(value) < 1 || Number(value) > 100000)) {
+        callback(new Error('max_tokens必须在1-100000之间'))
+        return
+      }
+      callback()
+    },
+    trigger: 'blur'
+  }]
 }
 
 const ttsForm = reactive({
@@ -796,15 +847,20 @@ async function loadLlmIfExists() {
     llmConfigId.value = config.id
     llmForm.name = config.name
     llmForm.config_id = config.config_id
-    llmForm.provider = config.provider || 'openai'
     const data = JSON.parse(config.json_data || '{}')
-    if (data.type !== undefined) llmForm.type = data.type
+    const detectedProvider = resolveLLMProvider(config.provider, data.type)
+    llmForm.provider = detectedProvider
+    llmForm.type = getProviderFixedType(detectedProvider)
     if (data.model_name !== undefined) llmForm.model_name = data.model_name
     if (data.api_key !== undefined) llmForm.api_key = data.api_key
     if (data.base_url !== undefined) llmForm.base_url = data.base_url
     if (data.max_tokens !== undefined) llmForm.max_tokens = data.max_tokens
     if (data.temperature !== undefined) llmForm.temperature = data.temperature
     if (data.top_p !== undefined) llmForm.top_p = data.top_p
+    if (data.thinking?.mode !== undefined) llmForm.thinking_mode = data.thinking.mode
+    if (data.thinking?.budget_tokens !== undefined) llmForm.thinking_budget_tokens = Number(data.thinking.budget_tokens) || null
+    if (data.thinking?.effort !== undefined) llmForm.thinking_effort = data.thinking.effort
+    if (data.thinking?.clear_thinking !== undefined) llmForm.thinking_clear_thinking = data.thinking.clear_thinking
   } catch (_) {}
 }
 
@@ -869,7 +925,14 @@ function prevStep() {
 
 function formatTestMessage(result) {
   const base = result.message || ''
-  return result.first_packet_ms != null ? `${base} ${result.first_packet_ms}ms` : base
+  const suffix = []
+  if (result.first_packet_ms != null) suffix.push(`${result.first_packet_ms}ms`)
+  if (result.reasoning_content_returned) suffix.push('检测到上游返回思考内容')
+  return suffix.length ? `${base} ${suffix.join(' · ')}` : base
+}
+
+function formatDraftTestLabel(name, configId) {
+  return name?.trim() || configId?.trim() || '当前配置'
 }
 
 async function testCurrentStepConfig() {
@@ -892,8 +955,9 @@ async function testCurrentStepConfig() {
     testingStep.value = true
     try {
       const result = await testWithData('vad', { [configId]: payload })
-      if (result.ok) ElMessage.success(formatTestMessage(result) || '测试通过')
-      else ElMessage.warning(result.message || '测试未通过')
+      const label = formatDraftTestLabel(vadForm.name, configId)
+      if (result.ok) ElMessage.success(`${label}：${formatTestMessage(result) || '测试通过'}`)
+      else ElMessage.warning(`${label}：${result.message || '测试未通过'}`)
     } catch (err) {
       ElMessage.warning(err.response?.data?.error || '测试请求失败')
     } finally {
@@ -919,8 +983,9 @@ async function testCurrentStepConfig() {
     testingStep.value = true
     try {
       const result = await testWithData('asr', { [configId]: payload })
-      if (result.ok) ElMessage.success(formatTestMessage(result) || '测试通过')
-      else ElMessage.warning(result.message || '测试未通过')
+      const label = formatDraftTestLabel(asrForm.name, configId)
+      if (result.ok) ElMessage.success(`${label}：${formatTestMessage(result) || '测试通过'}`)
+      else ElMessage.warning(`${label}：${result.message || '测试未通过'}`)
     } catch (err) {
       ElMessage.warning(err.response?.data?.error || '测试请求失败')
     } finally {
@@ -945,9 +1010,10 @@ async function testCurrentStepConfig() {
     }
     testingStep.value = true
     try {
-      const result = await testWithData('llm', { [configId]: payload })
-      if (result.ok) ElMessage.success(formatTestMessage(result) || '测试通过')
-      else ElMessage.warning(result.message || '测试未通过')
+      const result = await testWithData('llm', { provider: configId, [configId]: payload })
+      const label = formatDraftTestLabel(llmForm.name, configId)
+      if (result.ok) ElMessage.success(`${label}：${formatTestMessage(result) || '测试通过'}`)
+      else ElMessage.warning(`${label}：${result.message || '测试未通过'}`)
     } catch (err) {
       ElMessage.warning(err.response?.data?.error || '测试请求失败')
     } finally {
@@ -973,8 +1039,9 @@ async function testCurrentStepConfig() {
     testingStep.value = true
     try {
       const result = await testWithData('tts', { [configId]: payload })
-      if (result.ok) ElMessage.success(formatTestMessage(result) || '测试通过')
-      else ElMessage.warning(result.message || '测试未通过')
+      const label = formatDraftTestLabel(ttsForm.name, configId)
+      if (result.ok) ElMessage.success(`${label}：${formatTestMessage(result) || '测试通过'}`)
+      else ElMessage.warning(`${label}：${result.message || '测试未通过'}`)
     } catch (err) {
       ElMessage.warning(err.response?.data?.error || '测试请求失败')
     } finally {
@@ -1154,7 +1221,7 @@ onMounted(async () => {
 <style scoped>
 .config-wizard {
   padding: 20px;
-  max-width: 720px;
+  max-width: 820px;
   margin: 0 auto;
 }
 .wizard-header {

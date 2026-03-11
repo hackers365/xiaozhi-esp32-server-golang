@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -17,12 +18,13 @@ import (
 )
 
 type AsrWsClient struct {
-	seq       int
-	url       string
-	connect   *websocket.Conn
-	appId     string
-	accessKey string
-	mu        sync.RWMutex // Protects connect from concurrent access
+	seq        int
+	url        string
+	connect    *websocket.Conn
+	appId      string
+	accessKey  string
+	resourceID string
+	mu         sync.RWMutex // Protects connect from concurrent access
 
 	// 延迟连接相关字段
 	connectOnce  sync.Once     // 确保连接只建立一次
@@ -31,20 +33,32 @@ type AsrWsClient struct {
 	connectErrMu sync.Mutex    // 保护 connectErr
 }
 
-func NewAsrWsClient(url string, appKey, accessKey string) *AsrWsClient {
+func NewAsrWsClient(url string, appKey, accessKey, resourceID string) *AsrWsClient {
 	return &AsrWsClient{
 		seq:          1,
 		url:          url,
 		appId:        appKey,
 		accessKey:    accessKey,
+		resourceID:   resourceID,
 		connectReady: make(chan struct{}),
 	}
 }
 
 func (c *AsrWsClient) CreateConnection(ctx context.Context) error {
-	header := request.NewAuthHeader(c.appId, c.accessKey)
+	header := request.NewAuthHeader(c.appId, c.accessKey, c.resourceID)
 	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, c.url, header)
 	if err != nil {
+		if resp != nil {
+			var body string
+			if resp.Body != nil {
+				bodyBytes, readErr := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if readErr == nil {
+					body = string(bodyBytes)
+				}
+			}
+			return fmt.Errorf("dial websocket err: %w, status=%d, body=%s", err, resp.StatusCode, body)
+		}
 		return fmt.Errorf("dial websocket err: %w", err)
 	}
 	_ = resp
@@ -262,8 +276,6 @@ func (c *AsrWsClient) recvMessages(ctx context.Context, resChan chan<- *response
 func (c *AsrWsClient) StartAudioStream(ctx context.Context, audioStream <-chan []float32, resChan chan<- *response.AsrResponse) error {
 	stopChan := make(chan struct{})
 	sendDoneChan := make(chan error, 1) // 发送完成通知（nil表示正常完成，error表示出错）
-
-	defer close(resChan)
 
 	// 启动发送 goroutine
 	go func() {

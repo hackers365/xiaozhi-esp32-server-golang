@@ -5,6 +5,7 @@ type DoubaoV2Config struct {
 	AppID         string // 应用ID
 	AccessToken   string // 访问令牌
 	WsURL         string // WebSocket URL
+	ResourceID    string // 资源ID
 	ModelName     string // 模型名称
 	EndWindowSize int    // 结束窗口大小
 	EnablePunc    bool   // 是否启用标点符号
@@ -17,6 +18,7 @@ type DoubaoV2Config struct {
 // DefaultConfig 默认配置
 var DefaultConfig = DoubaoV2Config{
 	WsURL:         "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream",
+	ResourceID:    "volc.bigasr.sauc.duration",
 	ModelName:     "bigmodel",
 	EndWindowSize: 800,
 	EnablePunc:    true,

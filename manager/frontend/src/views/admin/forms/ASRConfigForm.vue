@@ -1,5 +1,5 @@
 <template>
-  <el-form ref="formRef" :model="model" :rules="rules" label-width="120px">
+  <el-form ref="formRef" :model="model" :rules="rules" label-width="140px">
     <el-form-item label="提供商" prop="provider">
       <el-select v-model="model.provider" placeholder="请选择提供商" style="width: 100%" @change="onProviderChange">
         <el-option label="FunASR" value="funasr" />
@@ -108,8 +108,13 @@
       <el-form-item label="WebSocket URL" prop="doubao.ws_url">
         <el-input v-model="model.doubao.ws_url" placeholder="请输入WebSocket URL" />
       </el-form-item>
-      <el-form-item label="模型名称" prop="doubao.model_name">
-        <el-input v-model="model.doubao.model_name" placeholder="请输入模型名称" />
+      <el-form-item label="资源规格" prop="doubao.resource_id">
+        <el-select v-model="model.doubao.resource_id" placeholder="请选择资源规格" style="width: 100%">
+          <el-option label="豆包流式语音识别模型1.0 小时版" value="volc.bigasr.sauc.duration" />
+          <el-option label="豆包流式语音识别模型1.0 并发版" value="volc.bigasr.sauc.concurrent" />
+          <el-option label="豆包流式语音识别模型2.0 小时版" value="volc.seedasr.sauc.duration" />
+          <el-option label="豆包流式语音识别模型2.0 并发版" value="volc.seedasr.sauc.concurrent" />
+        </el-select>
       </el-form-item>
       <el-form-item label="结束窗口大小" prop="doubao.end_window_size">
         <el-input-number v-model="model.doubao.end_window_size" :min="1" style="width: 100%" />

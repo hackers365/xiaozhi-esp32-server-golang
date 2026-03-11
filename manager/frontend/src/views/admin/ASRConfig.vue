@@ -87,7 +87,7 @@
     <el-dialog
       v-model="showDialog"
       :title="editingConfig ? '编辑ASR配置' : '添加ASR配置'"
-      width="600px"
+      width="720px"
       @close="handleDialogClose"
     >
       <ASRConfigForm ref="formRef" :model="form" :rules="rules" />
@@ -235,7 +235,7 @@ const rules = computed(() => {
       'doubao.appid': [{ required: true, message: '请输入应用ID', trigger: 'blur' }],
       'doubao.access_token': [{ required: true, message: '请输入访问令牌', trigger: 'blur' }],
       'doubao.ws_url': [{ required: true, message: '请输入WebSocket URL', trigger: 'blur' }],
-      'doubao.model_name': [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
+      'doubao.resource_id': [{ required: true, message: '请选择资源规格', trigger: 'change' }],
       'doubao.end_window_size': [{ required: true, message: '请输入结束窗口大小', trigger: 'blur' }],
       'doubao.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
     }
@@ -551,6 +551,7 @@ const resetForm = () => {
     appid: '',
     access_token: '',
     ws_url: 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream',
+    resource_id: 'volc.bigasr.sauc.duration',
     model_name: 'bigmodel',
     end_window_size: 800,
     enable_punc: true,
