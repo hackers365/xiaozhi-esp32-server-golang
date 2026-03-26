@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
@@ -77,6 +79,15 @@ var wsDialer = websocket.Dialer{
 type synResp struct {
 	Audio  []byte
 	IsLast bool
+}
+
+type serverError struct {
+	code    int32
+	message string
+}
+
+func (e serverError) Error() string {
+	return fmt.Sprintf("服务端错误 (代码: %d): %s", e.code, e.message)
 }
 
 // DoubaoWSProvider 读伴WebSocket TTS提供者
@@ -144,6 +155,10 @@ func (p *DoubaoWSProvider) TextToSpeech(ctx context.Context, text string, sample
 // TextToSpeech 将文本转换为语音，返回音频帧数据和错误
 func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, sampleRate int, channels int, frameDuration int) (outputOpusChan chan []byte, err error) {
 	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	if !hasReadableText(text) {
+		log.Warnf("TTS 文本无可读字符，跳过请求")
 		return nil, nil
 	}
 
@@ -229,10 +244,29 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 		}()
 		// 流式合成
 		chunkCount := 0
+		retryCount := 0
+		maxRetry := 1
 		//var allAudio []byte
 		for {
 			_, message, err := conn.ReadMessage()
 			if err != nil {
+				if chunkCount == 0 && retryCount < maxRetry {
+					retryCount++
+					log.Warnf("读取WebSocket消息失败(无音频)，尝试重连重试: %v", err)
+					p.clearConnection()
+					conn, err = p.getConnection(ctx)
+					if err != nil {
+						log.Errorf("重连WebSocket失败: %v", err)
+						return
+					}
+					if err = p.writeMessage(conn, websocket.BinaryMessage, clientRequest); err != nil {
+						log.Errorf("重发WebSocket消息失败: %v，清空连接", err)
+						p.clearConnection()
+						return
+					}
+					conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+					continue
+				}
 				log.Errorf("读取WebSocket消息失败: %v，清空连接", err)
 				// 连接断开，清空连接，下次使用时自动重连
 				p.clearConnection()
@@ -241,6 +275,28 @@ func (p *DoubaoWSProvider) TextToSpeechStream(ctx context.Context, text string, 
 
 			resp, err := parseResponse(message)
 			if err != nil {
+				var srvErr serverError
+				if errors.As(err, &srvErr) && srvErr.code == 3011 {
+					log.Warnf("服务端返回不可读文本错误(代码: %d): %s", srvErr.code, srvErr.message)
+					return
+				}
+				if chunkCount == 0 && retryCount < maxRetry {
+					retryCount++
+					log.Warnf("解析响应失败(无音频)，尝试重连重试: %v", err)
+					p.clearConnection()
+					conn, err = p.getConnection(ctx)
+					if err != nil {
+						log.Errorf("重连WebSocket失败: %v", err)
+						return
+					}
+					if err = p.writeMessage(conn, websocket.BinaryMessage, clientRequest); err != nil {
+						log.Errorf("重发WebSocket消息失败: %v，清空连接", err)
+						p.clearConnection()
+						return
+					}
+					conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+					continue
+				}
 				// 解析失败时必须清连接，避免当前连接残留响应污染下一次TTS请求
 				log.Errorf("解析响应失败: %v，清空连接", err)
 				p.clearConnection()
@@ -397,6 +453,15 @@ func (p *DoubaoWSProvider) setupInput(text, voiceType, opt string, sampleRate in
 	return resBytes
 }
 
+func hasReadableText(text string) bool {
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // gzip压缩
 func gzipCompress(input []byte) []byte {
 	var b bytes.Buffer
@@ -476,7 +541,7 @@ func parseResponse(res []byte) (resp synResp, err error) {
 		}
 
 		log.Errorf("服务端错误 (代码: %d): %s", code, string(errMsg))
-		err = fmt.Errorf("服务端错误 (代码: %d): %s", code, string(errMsg))
+		err = serverError{code: code, message: string(errMsg)}
 		return
 	} else if messageType == 0xc { // frontend server response (12)
 		// 解析前端消息
