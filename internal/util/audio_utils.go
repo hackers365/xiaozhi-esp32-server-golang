@@ -26,6 +26,21 @@ func min(x, y int) int {
 	return y
 }
 
+// applyFadeIn 对PCM数据应用淡入效果，消除音频开头的点击噪声
+// fadeSamples: 淡入的采样点数量，通常取20-30ms的采样点数
+// 使用余弦曲线实现更平滑的淡入效果
+func applyFadeIn(pcmData []int16, fadeSamples int) {
+	if len(pcmData) == 0 || fadeSamples <= 0 {
+		return
+	}
+	actualFade := min(fadeSamples, len(pcmData))
+	for i := 0; i < actualFade; i++ {
+		t := float64(i) / float64(actualFade)
+		factor := (1.0 - math.Cos(t*math.Pi)) / 2.0
+		pcmData[i] = int16(float64(pcmData[i]) * factor)
+	}
+}
+
 // readCloserWrapper 为 bytes.Reader 提供 Close 方法以实现 ReadCloser 接口
 type readCloserWrapper struct {
 	*bytes.Reader
@@ -306,6 +321,8 @@ func (d *AudioDecoder) RunOpusDecoder(startTs int64) error {
 
 		if !firstFrame {
 			firstFrame = true
+			fadeSamples := sourceSampleRate * 10 / 1000
+			applyFadeIn(outputPCM, fadeSamples)
 			log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
 		}
 
@@ -585,17 +602,19 @@ func (d *AudioDecoder) RunWavDecoder(startTs int64, isRaw bool) error {
 
 				// 如果缓冲区已满,进行编码或输出
 				if currentFramePos == len(pcmBuffer) {
-					if !firstFrame {
-						firstFrame = true
-						log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
-					}
-
 					var opusPcmBuffer []int16 = pcmBuffer
 					if d.targetSampleRate > 0 && d.targetSampleRate != sampleRate {
 						pcmBytes := Int16SliceToBytes(opusPcmBuffer)
 						pcmFloat32 := PCM16BytesToFloat32(pcmBytes)
 						pcmFloat32 = ResampleLinearFloat32(pcmFloat32, sampleRate, d.targetSampleRate)
 						opusPcmBuffer = Float32SliceToInt16Slice(pcmFloat32)
+					}
+
+					if !firstFrame {
+						firstFrame = true
+						fadeSamples := sampleRate * 20 / 1000
+						applyFadeIn(opusPcmBuffer, fadeSamples)
+						log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
 					}
 
 					if d.TargetAudioFormat == "opus" {
@@ -793,17 +812,19 @@ func (d *AudioDecoder) RunMp3Decoder(startTs int64) error {
 
 				// 如果pcmBuffer已满一帧，则进行编码或输出
 				if currentFramePos == len(pcmBuffer) {
-					if !firstFrame {
-						firstFrame = true
-						log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
-					}
-
 					var opusPcmBuffer []int16 = pcmBuffer
 					if d.targetSampleRate > 0 && d.targetSampleRate != int(sampleRate) {
 						pcmBytes := Int16SliceToBytes(opusPcmBuffer)
 						pcmFloat32 := PCM16BytesToFloat32(pcmBytes)
 						pcmFloat32 = ResampleLinearFloat32(pcmFloat32, int(sampleRate), d.targetSampleRate)
 						opusPcmBuffer = Float32SliceToInt16Slice(pcmFloat32)
+					}
+
+					if !firstFrame {
+						firstFrame = true
+						fadeSamples := int(sampleRate) * 10 / 1000
+						applyFadeIn(opusPcmBuffer, fadeSamples)
+						log.Infof("tts云端->首帧解码完成耗时: %d ms", time.Now().UnixMilli()-startTs)
 					}
 
 					if d.TargetAudioFormat == "opus" {
