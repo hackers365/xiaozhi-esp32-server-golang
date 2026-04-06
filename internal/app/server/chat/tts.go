@@ -829,6 +829,10 @@ func (t *TTSManager) finishTtsStop(ctx context.Context, sendTtsStop bool, stopEr
 			}
 			log.Errorf("发送 TtsStop 失败: %v", err)
 		}
+	} else if t.clientState.IsRealTime() {
+		// realtime 模式下不发 TtsStop，也要回到可监听状态，避免长期停留在 ttsStart
+		t.clientState.SetTtsStart(false)
+		t.clientState.SetStatus(ClientStatusListenStop)
 	}
 	if t.session != nil {
 		hookErr := t.session.hookHub.EmitTTSOutputStop(t.session.hookContext(ctx), chathooks.TTSOutputStopData{Err: stopErr})

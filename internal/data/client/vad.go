@@ -14,8 +14,8 @@ type Vad struct {
 	VadProvider vad_inter.VAD
 
 	IdleDuration           int64 // 空闲时间, 单位: ms
-	VoiceDuration          int64 // 累积检测到声音的时长, 单位: ms
-	VoiceDurationInSession int64 // 一次过程中累积检测到声音的时长, 单位: ms
+	VoiceDuration          int64 // 连续检测到声音的时长, 单位: ms（无声音会重置）
+	VoiceDurationInSession int64 // 一次会话中累计检测到声音的时长, 单位: ms
 }
 
 func (v *Vad) AddIdleDuration(idleDuration int64) int64 {
@@ -50,7 +50,7 @@ func (v *Vad) ResetVoiceContinuousDuration() {
 }
 
 func (v *Vad) GetVoiceContinuousDuration() int64 {
-	return atomic.LoadInt64(&v.VoiceDurationInSession)
+	return atomic.LoadInt64(&v.VoiceDuration)
 }
 
 func (v *Vad) GetVoiceDurationInSession() int64 {

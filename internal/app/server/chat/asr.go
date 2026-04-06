@@ -55,6 +55,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 	go func() {
 		hasTriggeredCancel := true // 标志位，记录是否已触发过取消操作（当 voiceDuration > 120 时）
 		hasLoggedFirstTextExtendedWait := false
+		wasServerBusy := false
 		audioFormat := state.InputAudioFormat
 		// 使用一个足够大的缓冲区用于解码（假设最大帧时长为120ms）
 		maxFrameSize := audioFormat.SampleRate * audioFormat.Channels * 120 / 1000
@@ -68,6 +69,12 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 		var frameSize int
 		var frameDurationMs int
 		var vadNeedGetCount int // VAD需要的帧数，会在第一帧后计算
+
+		const (
+			realtimePreTextMinVoiceToResetIdleMs int64 = 300
+			realtimeInterruptMinVoiceMs          int64 = 360
+			minVoiceDurationToKeepSessionMs      int64 = 100
+		)
 
 		// VAD 资源改为懒加载 + 空闲释放，避免长期独占资源池实例。
 		var vadWrapper *pool.ResourceWrapper[inter.VAD]
@@ -238,14 +245,37 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 				}
 
 				if !haveVoice || state.Asr.AutoEnd {
-					state.Vad.AddIdleDuration(int64(frameDurationMs))
-					idleDuration := state.Vad.GetIdleDuration()
-					log.Infof("空闲时间: %dms", idleDuration)
-					if idleDuration > state.GetMaxIdleDuration() {
-						log.Infof("超出空闲时长: %dms, 断开连接", idleDuration)
-						//断开连接
-						onClose()
-						return
+					status := state.GetStatus()
+					ttsFinished := state.Statistic.TtsStartTs > 0 && state.Statistic.TtsStopTs >= state.Statistic.TtsStartTs
+
+					// 自愈：统计上 TTS 已结束，但状态仍卡在 ttsStart 时回收到 listenStop
+					if status == ClientStatusTTSStart && ttsFinished {
+						state.SetTtsStart(false)
+						state.SetStatus(ClientStatusListenStop)
+						status = ClientStatusListenStop
+						log.Debugf("检测到TTS统计已结束，修正卡住状态: tts_start=%d, tts_stop=%d", state.Statistic.TtsStartTs, state.Statistic.TtsStopTs)
+					}
+
+					isTtsBusy := status == ClientStatusTTSStart && (state.GetTtsStart() || !ttsFinished)
+					isLlmBusy := status == ClientStatusLLMStart && (state.Statistic.LlmEndTs == 0 || state.Statistic.LlmEndTs < state.Statistic.LlmStartTs)
+					if isTtsBusy || isLlmBusy {
+						if !wasServerBusy {
+							log.Debugf("服务端仍在处理任务(%s)，暂停空闲计时", status)
+						}
+						wasServerBusy = true
+					} else {
+						if wasServerBusy {
+							state.Vad.ResetIdleDuration()
+							log.Debugf("服务端任务已结束，恢复空闲计时: status=%s", status)
+							wasServerBusy = false
+						}
+						idleDuration := state.Vad.AddIdleDuration(int64(frameDurationMs))
+						log.Infof("空闲时间: %dms", idleDuration)
+						if idleDuration > state.GetMaxIdleDuration() {
+							log.Infof("超出空闲时长: %dms, 断开连接", idleDuration)
+							onClose()
+							return
+						}
 					}
 				}
 
@@ -254,18 +284,28 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 					//log.Infof("检测到语音, len: %d", len(pcmData))
 					state.SetClientHaveVoice(true)
 					state.SetClientHaveVoiceLastTime(time.Now().UnixMilli())
-					if !state.Asr.AutoEnd {
-						state.Vad.ResetIdleDuration()
-					}
 					// 累积检测到声音的时长（同时更新一次过程中的时长）
 					state.Vad.AddVoiceDuration(int64(frameDurationMs))
 
 					continuousVoiceDuration := state.Vad.GetVoiceContinuousDuration()
-					if state.IsRealTime() && viper.GetInt("chat.realtime_mode") == 1 && continuousVoiceDuration > 360 {
+					if !state.Asr.AutoEnd {
+						shouldResetIdleDuration := true
+						if state.IsRealTime() && !state.Asr.HasReceivedText() {
+							if continuousVoiceDuration < realtimePreTextMinVoiceToResetIdleMs {
+								shouldResetIdleDuration = false
+								log.Debugf("realtime模式首文本前疑似噪声语音，暂不重置空闲计时: continuous_voice=%dms, threshold=%dms, idle=%dms", continuousVoiceDuration, realtimePreTextMinVoiceToResetIdleMs, state.Vad.GetIdleDuration())
+							}
+						}
+						if shouldResetIdleDuration {
+							state.Vad.ResetIdleDuration()
+						}
+					}
+
+					if state.IsRealTime() && viper.GetInt("chat.realtime_mode") == 1 && continuousVoiceDuration > realtimeInterruptMinVoiceMs {
 						// 只有在未触发过的情况下才执行，确保只执行一次
 						if !hasTriggeredCancel {
 							//realtime模式下, 如果此时有正在进行的llm和tts则取消掉
-							log.Debugf("realtime模式vad打断下 && 语音时长超过%d ms 如果此时有正在进行的llm和tts则取消掉", continuousVoiceDuration)
+							log.Debugf("realtime模式vad打断下 && 语音时长超过%dms(当前=%dms)，如果此时有正在进行的llm和tts则取消掉", realtimeInterruptMinVoiceMs, continuousVoiceDuration)
 							state.AfterAsrSessionCtx.CancelWithReason("ASRManager.ProcessVadAudio: realtime_mode=1 VAD interrupt")
 							if a.session != nil {
 								a.session.InterruptAndClearTTSQueue()
@@ -319,10 +359,10 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context, onClose func()) {
 				lastHaveVoiceTime := state.GetClientHaveVoiceLastTime()
 
 				if clientHaveVoice && lastHaveVoiceTime > 0 && !haveVoice {
-					// 判断有音频的语音时长，如果小于300ms则重置clientHaveVoice，避免短时间语音造成的误判
+					// 判断有音频的语音时长，过短则重置 clientHaveVoice，避免短时间语音造成误判
 					voiceDurationInSession := state.Vad.GetVoiceDurationInSession()
-					if voiceDurationInSession < 100 {
-						log.Debugf("语音时长过短 (%dms < 300ms)，重置clientHaveVoice", voiceDurationInSession)
+					if voiceDurationInSession < minVoiceDurationToKeepSessionMs {
+						log.Debugf("语音时长过短 (%dms < %dms)，重置clientHaveVoice", voiceDurationInSession, minVoiceDurationToKeepSessionMs)
 						state.SetClientHaveVoice(false)
 						state.Vad.ResetVoiceDuration()
 						continue
@@ -489,7 +529,7 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 		//最大空闲 60s
 		var startIdleTime, maxIdleTime int64
 		startIdleTime = time.Now().Unix()
-		maxIdleTime = 60
+		maxIdleTime = state.GetMaxIdleDuration()/1000
 
 		// 状态不允许重启时的等待计数（避免无限循环）
 		var invalidStatusWaitCount int64

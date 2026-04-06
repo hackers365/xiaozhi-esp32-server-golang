@@ -64,6 +64,7 @@ func (s *ServerTransport) SendTtsStop() error {
 		return err
 	}
 	s.clientState.IsWelcomePlaying = false
+	s.clientState.SetTtsStart(false)
 	// 一轮对话播报结束后，回到可触发下一轮对话的状态。
 	s.clientState.SetStatus(ClientStatusListenStop)
 	return nil
