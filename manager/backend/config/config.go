@@ -16,6 +16,7 @@ type Config struct {
 	SpeakerService    SpeakerServiceConfig `json:"speaker_service"`
 	Storage           StorageConfig        `json:"storage"`
 	History           HistoryConfig        `json:"history"`
+	MqttSignatureKey     string         `json:"mqtt_signature_key"`
 }
 
 type ServerConfig struct {

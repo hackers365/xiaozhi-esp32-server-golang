@@ -17,6 +17,7 @@ import (
 	"github.com/gorilla/websocket"
 	cmap "github.com/orcaman/concurrent-map/v2"
 
+	"xiaozhi-esp32-server-golang/internal/app/mqtt_server"
 	"xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	"xiaozhi-esp32-server-golang/internal/domain/openclaw"
@@ -755,6 +756,10 @@ func (c *WebSocketClient) handleDefaultRequest(request *WebSocketRequest) {
 		// 处理MCP工具调用请求
 		c.handleMcpToolCallRequest(request)
 
+	case "/api/mcp/device_publish":
+		// 处理设备维度MCP原始请求透传（publish->wait response）
+		c.handleMcpDevicePublishRequest(request)
+
 	case "/api/openclaw/status":
 		c.handleOpenClawStatusRequest(request)
 
@@ -1279,6 +1284,50 @@ func (c *WebSocketClient) handleMcpToolCallRequest(request *WebSocketRequest) {
 		"tool_name": toolName,
 		"result":    result,
 	}, "")
+}
+
+func (c *WebSocketClient) handleMcpDevicePublishRequest(request *WebSocketRequest) {
+	deviceID := ""
+	method := ""
+	params := map[string]interface{}{}
+	timeoutMs := 15000
+
+	if request.Body != nil {
+		if id, ok := request.Body["device_id"].(string); ok {
+			deviceID = strings.TrimSpace(id)
+		}
+		if m, ok := request.Body["method"].(string); ok {
+			method = strings.TrimSpace(m)
+		}
+		if p, ok := request.Body["params"].(map[string]interface{}); ok {
+			params = p
+		}
+		switch v := request.Body["timeout_ms"].(type) {
+		case int:
+			timeoutMs = v
+		case int32:
+			timeoutMs = int(v)
+		case int64:
+			timeoutMs = int(v)
+		case float64:
+			timeoutMs = int(v)
+		case float32:
+			timeoutMs = int(v)
+		}
+	}
+
+	if deviceID == "" || method == "" {
+		_ = c.SendResponse(request.ID, 400, nil, "缺少device_id或method参数")
+		return
+	}
+
+	resp, err := mqtt_server.PublishMcpMessageAndWaitResponse(context.Background(), deviceID, method, params, timeoutMs)
+	if err != nil {
+		_ = c.SendResponse(request.ID, 500, nil, fmt.Sprintf("设备MCP透传调用失败: %v", err))
+		return
+	}
+
+	_ = c.SendResponse(request.ID, 200, resp, "")
 }
 
 func (c *WebSocketClient) handleOpenClawStatusRequest(request *WebSocketRequest) {

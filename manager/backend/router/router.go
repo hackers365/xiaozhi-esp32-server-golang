@@ -91,6 +91,16 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		}
 
 		// 需要认证的路由
+		commandsAuth := api.Group("/commands")
+		commandsAuth.Use(middleware.McpDailyAuth(cfg.MqttSignatureKey))
+		{
+			commandsAuth.POST("/:id", userController.CallDeviceMcpPublish)
+		}
+		mcpAuth := api.Group("/mcp")
+		mcpAuth.Use(middleware.McpDailyAuth(cfg.MqttSignatureKey))
+		{
+			mcpAuth.POST("/devices/inject-message", userController.InjectMessageByMcp)
+		}
 		auth := api.Group("")
 		auth.Use(middleware.JWTAuth())
 		{

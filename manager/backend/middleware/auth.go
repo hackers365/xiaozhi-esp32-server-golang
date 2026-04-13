@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
+	"strconv"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 )
@@ -104,6 +104,85 @@ func AdminAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		c.Next()
+	}
+}
+
+
+// pad2 将数字格式化为2位字符串，不足补0
+func pad2(n int) string {
+	if n < 10 {
+		return "0" + string(rune('0'+n))
+	}
+	return strconv.Itoa(n)
+}
+
+// dateStrNow 获取当前UTC日期字符串，格式：yyyy-MM-dd
+func dateStrNow() string {
+	now := time.Now().UTC()
+	return strconv.Itoa(now.Year()) + "-" + pad2(int(now.Month())) + "-" + pad2(now.Day())
+}
+
+// simpleHash 计算字符串的简单哈希值（与app.js相同的算法）
+func simpleHash(value string) string {
+	const mod1 int64 = 1000000007
+	const mod2 int64 = 1000000009
+	var h1 int64 = 0
+	var h2 int64 = 0
+	for i := 0; i < len(value); i++ {
+		c := int64(value[i])
+		h1 = (h1*131 + c) % mod1
+		h2 = (h2*137 + c) % mod2
+	}
+	// 转换为16进制字符串，与JavaScript的toString(16)保持一致
+	return strconv.FormatInt(h1, 16) + strconv.FormatInt(h2, 16)
+}
+
+// calculateDailyToken 计算当日令牌
+func calculateDailyToken(dateStr string,mqttSignatureKey string) string {
+	ds := dateStr
+	if ds == "" {
+		ds = dateStrNow()
+	}
+	log.Printf("[McpDailyAuth] 计算令牌，日期: %s, 密钥: %s", ds, mqttSignatureKey)
+	return simpleHash(ds + mqttSignatureKey)
+}
+
+// verifyAuthorizationHeader 验证Authorization头
+func verifyAuthorizationHeader(authorization string,mqttSignatureKey string) bool {
+	expected := calculateDailyToken("",mqttSignatureKey)
+	log.Printf("[McpDailyAuth] 验证Authorization头: %s, 期望: %s", authorization, expected)
+	return authorization == expected
+}
+
+
+func McpDailyAuth(mqttSignatureKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 添加调试日志
+		log.Printf("[McpDailyAuth] 处理请求: %s %s, 客户端IP: %s", c.Request.Method, c.Request.URL.Path, c.ClientIP())
+
+		authHeader := c.GetHeader("Authorization")
+		log.Printf("[McpDailyAuth] Authorization头: %s", authHeader)
+
+		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+			log.Printf("[McpDailyAuth] ❌ 未提供有效的Authorization头")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "未提供有效的Authorization头"})
+			c.Abort()
+			return
+		}
+
+		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
+		log.Printf("[McpDailyAuth] 提取的token长度: %d, 前缀: %s", len(tokenString), tokenString[:min(20, len(tokenString))])
+
+		// 验证token
+		if !verifyAuthorizationHeader(tokenString,mqttSignatureKey) {
+			log.Printf("[McpDailyAuth] ❌ 无效的授权令牌")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效的授权令牌"})
+			c.Abort()
+			return
+		}
+
+		log.Printf("[McpDailyAuth] ✅ token验证成功")
 		c.Next()
 	}
 }

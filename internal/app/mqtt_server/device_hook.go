@@ -144,13 +144,21 @@ func (h *DeviceHook) OnPublish(cl *mqttServer.Client, pk packets.Packet) (packet
 		log.Info("消息内容: <空>")
 	}
 
-	//从cl中找到mac地址
+	// 服务端 inline client 下行到设备订阅主题时，不做主题改写
+	if strings.HasPrefix(pk.TopicName, client.MDeviceSubTopicPrefix) {
+		log.Info("==================")
+		return pk, nil
+	}
+
+	// 设备上行消息转发到统一设备公共主题
 	mac := parseMacFromClientId(cl.ID)
 	if mac == "" {
-		log.Info("警告: 无法从客户端ID解析MAC地址:", cl.ID)
+		log.Infof("跳过主题改写: 无法从客户端ID解析MAC地址: %s", cl.ID)
+		log.Info("==================")
 		return pk, nil
 	}
 	forwardTopic := fmt.Sprintf("%s%s", client.MDevicePubTopicPrefix, mac)
+	DispatchMcpPublishResponse(forwardTopic, pk.Payload)
 
 	pk.TopicName = forwardTopic
 

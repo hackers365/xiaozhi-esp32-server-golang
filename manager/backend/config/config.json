@@ -33,5 +33,6 @@
     "enabled": true,
     "audio_base_path": "./data/chat_history/audio",
     "max_file_size": 10485760
-  }
+  },
+  "mqtt_signature_key": "mqtt_signature_key"
 }

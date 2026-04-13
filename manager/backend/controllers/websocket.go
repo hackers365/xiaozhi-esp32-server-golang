@@ -743,6 +743,20 @@ func (ctrl *WebSocketController) CallMcpToolFromClient(ctx context.Context, body
 	return response.Body, nil
 }
 
+// CallDeviceMcpPublishFromClient 透传一条MCP请求到设备侧（publish -> wait response）
+func (ctrl *WebSocketController) CallDeviceMcpPublishFromClient(ctx context.Context, body map[string]interface{}) (map[string]interface{}, error) {
+	response, err := ctrl.broadcastRequestAndWaitFirstSuccess(ctx, "POST", "/api/mcp/device_publish", body)
+	if err != nil {
+		return nil, err
+	}
+
+	if response.Body == nil {
+		return map[string]interface{}{}, nil
+	}
+
+	return response.Body, nil
+}
+
 // RequestOpenClawStatusFromClient 请求客户端返回 OpenClaw 连接状态
 func (ctrl *WebSocketController) RequestOpenClawStatusFromClient(ctx context.Context, agentID string) (map[string]interface{}, error) {
 	body := map[string]interface{}{

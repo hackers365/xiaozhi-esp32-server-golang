@@ -26,6 +26,7 @@ type UserController struct {
 		RequestMcpToolDetailsFromClient(ctx context.Context, agentID string) ([]MCPTool, error)
 		RequestDeviceMcpToolDetailsFromClient(ctx context.Context, deviceID string) ([]MCPTool, error)
 		CallMcpToolFromClient(ctx context.Context, body map[string]interface{}) (map[string]interface{}, error)
+		CallDeviceMcpPublishFromClient(ctx context.Context, body map[string]interface{}) (map[string]interface{}, error)
 		RequestOpenClawStatusFromClient(ctx context.Context, agentID string) (map[string]interface{}, error)
 		CallOpenClawChatFromClient(ctx context.Context, body map[string]interface{}) (map[string]interface{}, error)
 		CallOpenClawChatStreamFromClient(ctx context.Context, body map[string]interface{}, onResponse func(*WebSocketResponse) error) (map[string]interface{}, error)
@@ -125,7 +126,48 @@ func (uc *UserController) InjectMessage(c *gin.Context) {
 		},
 	})
 }
+// 注入消息到设备
+func (uc *UserController) InjectMessageByMcp(c *gin.Context) {
+	// userID, _ := c.Get("user_id")
 
+	var req struct {
+		DeviceID string `json:"device_id" binding:"required"`
+		Message  string `json:"message" binding:"required"`
+		SkipLlm  bool   `json:"skip_llm"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	// 验证设备是否属于当前用户
+	var device models.Device
+
+	if err := uc.DB.Where("device_name = ? ", req.DeviceID).First(&device).Error; err != nil {
+		log.Printf("[InjectMessage] 设备查询失败: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "设备不存在或不属于当前用户"})
+		return
+	}
+
+	// 通过WebSocket发送消息注入请求到主服务器
+	ctx := context.Background()
+	err := uc.WebSocketController.InjectMessageToDevice(ctx, device.DeviceName, req.Message, req.SkipLlm)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "消息注入失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "消息注入请求已发送",
+		"data": gin.H{
+			"device_id": req.DeviceID,
+			"message":   req.Message,
+			"skip_llm":  req.SkipLlm,
+		},
+	})
+}
 // 用户直接创建设备（无需验证码）
 func (uc *UserController) CreateDevice(c *gin.Context) {
 	userID, _ := c.Get("user_id")
@@ -951,6 +993,76 @@ func (uc *UserController) CallDeviceMcpTool(c *gin.Context) {
 	result, err := uc.WebSocketController.CallMcpToolFromClient(context.Background(), body)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "调用MCP工具失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": result})
+}
+func extractMAC(input string) (string, bool) {
+	// 1. 去除前缀的 @@@（如果有）
+	input = strings.TrimPrefix(input, "@@@")
+	
+	// 2. 按 @@@ 分割，得到前后两段
+	parts := strings.Split(input, "@@@")
+	
+	// 3. 验证必须是两段
+	if len(parts) != 2 {
+		return "", false
+	}
+	
+	part1, part2 := parts[0], parts[1]
+	
+	// 4. 验证两段内容完全相同
+	if part1 != part2 {
+		return "", false
+	}
+	
+	// 5. 取后一段（去除前一段的效果），并将 _ 替换为 :
+	mac := strings.ReplaceAll(part2, "_", ":")
+	
+	return mac, true
+}
+// CallDeviceMcpPublish 透传MCP请求到设备订阅主题并等待返回
+func (uc *UserController) CallDeviceMcpPublish(c *gin.Context) {
+	// userID, _ := c.Get("user_id")
+	rawDeviceID := c.Param("id")
+	deviceID, ok := extractMAC(rawDeviceID)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+	}
+	var req struct {
+		Payload    map[string]interface{} `json:"payload"`
+		Type  string                 `json:"type"`
+		DeviceID  string                 `json:"deviceId"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
+		return
+	}
+
+	var device models.Device
+	// if err := uc.DB.Where("id = ? AND user_id = ?", deviceID, userID).First(&device).Error; err != nil {
+	if err := uc.DB.Where("device_name = ? ", deviceID).First(&device).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "设备不存在或不属于当前用户"})
+		return
+	}
+
+	// 仅使用 path 设备ID 对应的数据库 device_name 作为目标，再由下游统一转换为 MQTT 主题结构
+	targetDeviceID := strings.TrimSpace(device.DeviceName)
+
+	body := map[string]interface{}{
+		"device_id":  targetDeviceID,
+		"method":     strings.TrimSpace(req.Payload["method"].(string)),
+		"params":     req.Payload["params"],
+		"timeout_ms": 15000,
+	}
+	if targetDeviceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无法确定目标设备标识(device_id/client_id/mac_address)"})
+		return
+	}
+	result, err := uc.WebSocketController.CallDeviceMcpPublishFromClient(context.Background(), body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "透传MCP请求失败: " + err.Error()})
 		return
 	}
 
