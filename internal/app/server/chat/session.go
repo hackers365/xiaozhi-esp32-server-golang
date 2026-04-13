@@ -898,18 +898,14 @@ func (s *ChatSession) getOrCreateOpenClawStream(correlationID string) (chan llm_
 	if hasWarmup {
 		options.disableTTSCommands = true
 		options.onEndFunc = func(err error, args ...any) {
-			// 暖场接管了 start，正式 OpenClaw 回复收尾时需要在这里补回 stop；
-			// 不能放在暖场切换点发送，否则会把主回复中途截断。
-			if !s.clientState.IsRealTime() {
-				s.ttsManager.EnqueueTtsStop(ctx)
-			}
+			s.ttsManager.EnqueueTtsStop(ctx)
 			s.ttsManager.RequestTurnEnd(ctx, err)
 			s.finishOpenClawWarmup(correlationID, false)
 		}
 	}
 	log.Infof("OpenClaw stream created: device=%s correlation_id=%s warmup_attached=%v", s.clientState.DeviceID, correlationID, hasWarmup)
 	if err := s.llmManager.HandleLLMResponseChannelAsyncWithOptions(ctx, nil, streamChan, options); err != nil {
-		if hasWarmup && !s.clientState.IsRealTime() {
+		if hasWarmup {
 			s.ttsManager.EnqueueTtsStop(ctx)
 		}
 		if hasWarmup {

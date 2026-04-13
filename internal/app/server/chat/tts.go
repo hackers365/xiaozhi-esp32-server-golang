@@ -999,13 +999,7 @@ func (t *TTSManager) finishTtsStop(ctx context.Context, sendTtsStop bool, stopEr
 		ctx = context.Background()
 	}
 
-	shouldSendTtsStop := sendTtsStop
-	if shouldSendTtsStop && t.clientState.IsRealTime() {
-		shouldSendTtsStop = false
-		log.Debugf("realtime 模式跳过发送 TtsStop: stop_err=%v", stopErr)
-	}
-
-	if shouldSendTtsStop {
+	if sendTtsStop {
 		if err := t.serverTransport.SendTtsStop(); err != nil {
 			if stopErr == nil {
 				stopErr = err
