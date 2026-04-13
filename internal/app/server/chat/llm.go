@@ -820,15 +820,19 @@ func (l *LLMManager) handleLLMResponse(ctx context.Context, userMessage *schema.
 				}
 
 				hasText := strings.TrimSpace(llmResponse.Text) != ""
+				if hasText {
+					fullText.WriteString(llmResponse.Text)
+				}
 				if hasText || llmResponse.IsStart || llmResponse.IsEnd {
 					// 双流式收尾依赖空文本的 IsEnd 信号，不能只在有文本时才传给 TTS。
 					if err := l.ttsManager.handleTextResponseWithHooks(ctx, llmResponse, false, onTTSItemEnqueued); err != nil {
+						if ctx.Err() != nil {
+							saveInterruptedAssistant()
+							return result, nil
+						}
 						result.ok = true
 						return result, err
 					}
-				}
-				if hasText {
-					fullText.WriteString(llmResponse.Text)
 				}
 
 				if llmResponse.IsEnd {
