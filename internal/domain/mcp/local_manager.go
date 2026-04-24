@@ -39,6 +39,9 @@ func GetLocalMCPManager() *LocalMCPManager {
 
 // initDefaultTools 初始化默认的本地工具
 func (l *LocalMCPManager) initDefaultTools() {
+	if err := l.registerSchedulerTools(); err != nil {
+		log.Errorf("注册 scheduler 本地工具失败: %v", err)
+	}
 
 	log.Info("本地MCP管理器默认工具初始化完成")
 }

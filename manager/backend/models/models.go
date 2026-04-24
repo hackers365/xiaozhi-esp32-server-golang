@@ -337,3 +337,23 @@ func (m *ChatMessage) AfterFind(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+// SchedulerTask 定时任务模型（用于控制台增删改查）
+type SchedulerTask struct {
+	ID           uint       `json:"id" gorm:"primarykey"`
+	Name         string     `json:"name" gorm:"type:varchar(100);not null"`
+	Enabled      bool       `json:"enabled" gorm:"default:true;index"`
+	ScheduleType string     `json:"schedule_type" gorm:"type:varchar(20);not null;default:'once'"` // once/interval/cron
+	RunAt        *time.Time `json:"run_at"`
+	CronExpr     string     `json:"cron_expr" gorm:"type:varchar(120)"`
+	IntervalSec  int64      `json:"interval_sec" gorm:"default:0"`
+	Timezone     string     `json:"timezone" gorm:"type:varchar(64);default:'Asia/Shanghai'"`
+
+	TaskMode      string `json:"task_mode" gorm:"type:varchar(20);default:'inject_llm'"` // inject_llm/mcp_call
+	TaskText      string `json:"task_text" gorm:"type:text"`
+	ToolName      string `json:"tool_name" gorm:"type:varchar(100)"`
+	ArgumentsJSON string `json:"-" gorm:"type:text"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

@@ -375,6 +375,10 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.POST("/agents/:id/mcp-call", adminController.CallAgentMcpTool)
 				admin.GET("/devices/:id/mcp-tools", adminController.GetDeviceMcpTools)
 				admin.POST("/devices/:id/mcp-call", adminController.CallDeviceMcpTool)
+				admin.GET("/scheduler-tasks", adminController.GetSchedulerTasks)
+				admin.POST("/scheduler-tasks", adminController.CreateSchedulerTask)
+				admin.PUT("/scheduler-tasks/:id", adminController.UpdateSchedulerTask)
+				admin.DELETE("/scheduler-tasks/:id", adminController.DeleteSchedulerTask)
 
 				// 用户管理
 				admin.GET("/users", adminController.GetUsers)

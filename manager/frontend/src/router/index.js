@@ -186,6 +186,12 @@ const routes = [
             name: 'AdminAgents',
             component: () => import('../views/admin/Agents.vue'),
             meta: { title: '智能体管理' }
+          },
+          {
+            path: 'scheduler-tasks',
+            name: 'AdminSchedulerTasks',
+            component: () => import('../views/admin/SchedulerTasks.vue'),
+            meta: { title: '定时任务管理' }
           }
         ]
       },

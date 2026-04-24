@@ -118,6 +118,10 @@
           <el-icon><Connection /></el-icon>
           <span>智能体管理</span>
         </el-menu-item>
+        <el-menu-item v-if="authStore.isAdmin" index="/admin/scheduler-tasks">
+          <el-icon><Timer /></el-icon>
+          <span>定时任务</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     
@@ -200,7 +204,8 @@ import {
   DataAnalysis,
   Guide,
   Upload,
-  Document
+  Document,
+  Timer
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

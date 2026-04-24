@@ -95,6 +95,7 @@ func (sc *SetupController) InitializeDatabase(c *gin.Context) {
 		&models.SpeakerGroup{},
 		&models.SpeakerSample{},
 		&models.ChatMessage{},
+		&models.SchedulerTask{},
 	)
 	if err != nil {
 		tx.Rollback()

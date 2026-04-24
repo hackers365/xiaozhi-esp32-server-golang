@@ -93,7 +93,8 @@ const systemItems = [
   { title: '全局角色', path: '/admin/global-roles' },
   { title: '用户管理', path: '/admin/users' },
   { title: '设备管理', path: '/admin/devices' },
-  { title: '智能体管理', path: '/admin/agents' }
+  { title: '智能体管理', path: '/admin/agents' },
+  { title: '定时任务', path: '/admin/scheduler-tasks' }
 ]
 
 const go = (path) => {
