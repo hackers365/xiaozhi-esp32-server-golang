@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	log "xiaozhi-esp32-server-golang/logger"
 
 	"github.com/cloudwego/eino/components/tool"
@@ -29,6 +30,7 @@ type McpTool struct {
 	originName string
 	serverName string
 	client     *client.Client
+	requestMu  *sync.Mutex
 
 	// 本地工具支持
 	isLocal      bool
@@ -136,7 +138,7 @@ func (t *McpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 		},
 	}
 
-	result, err := callRemoteMCPTool(ctx, t.client, callRequest)
+	result, err := t.callRemoteTool(ctx, callRequest)
 	if err != nil {
 		if !isRetryableRemoteCallError(err) {
 			return retContent, fmt.Errorf("调用工具失败: %v", err)
@@ -150,7 +152,7 @@ func (t *McpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 		}
 
 		t.client = newClient
-		result, err = callRemoteMCPTool(ctx, t.client, callRequest)
+		result, err = t.callRemoteTool(ctx, callRequest)
 		if err != nil {
 			return retContent, fmt.Errorf("重连后调用仍然失败: %v", err)
 		}
@@ -166,6 +168,17 @@ func (t *McpTool) InvokableRun(ctx context.Context, argumentsInJSON string, opts
 	}
 
 	return string(resultStr), nil
+}
+
+func (t *McpTool) callRemoteTool(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if t.requestMu != nil {
+		t.requestMu.Lock()
+		defer t.requestMu.Unlock()
+	}
+	if t.client == nil {
+		return nil, fmt.Errorf("MCP客户端未初始化")
+	}
+	return callRemoteMCPTool(ctx, t.client, request)
 }
 
 func (t *McpTool) GetClient() *client.Client {

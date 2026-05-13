@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -23,8 +24,11 @@ import (
 const (
 	globalMCPPingInterval                 = 60 * time.Second
 	globalMCPPingTimeout                  = 5 * time.Second
+	globalMCPRequestTimeout               = 15 * time.Second
 	globalMCPPeriodicToolsRefreshInterval = 2 * time.Minute
 )
+
+var errMCPRequestBusy = errors.New("mcp request already in progress")
 
 // MCPServerConfig MCP服务器配置
 type MCPServerConfig struct {
@@ -65,6 +69,8 @@ type MCPServerConnection struct {
 	connected     bool
 	refreshing    bool
 	refreshQueued bool
+	pinging       bool
+	requestMu     sync.Mutex
 	mu            sync.RWMutex
 	lastError     error
 	retryCount    int
@@ -306,7 +312,9 @@ func (conn *MCPServerConnection) connect() (retErr error) {
 	}
 
 	log.Infof("正在初始化MCP服务器: %s", conn.config.Name)
-	initResult, err := mcpClient.Initialize(ctx, initRequest)
+	initCtx, initCancel := context.WithTimeout(ctx, globalMCPRequestTimeout)
+	initResult, err := mcpClient.Initialize(initCtx, initRequest)
+	initCancel()
 	if err != nil {
 		log.Errorf("初始化MCP服务器失败，服务器: %s, 错误: %v", conn.config.Name, err)
 		retErr = fmt.Errorf("初始化失败: %v", err)
@@ -316,7 +324,10 @@ func (conn *MCPServerConnection) connect() (retErr error) {
 	log.Infof("MCP服务器初始化成功: %s, 结果: %+v", conn.config.Name, initResult)
 
 	// 获取工具列表
-	if refreshErr := conn.refreshTools(ctx); refreshErr != nil {
+	refreshCtx, refreshCancel := context.WithTimeout(ctx, globalMCPRequestTimeout)
+	refreshErr := conn.refreshTools(refreshCtx)
+	refreshCancel()
+	if refreshErr != nil {
 		log.Errorf("获取工具列表失败: %v", refreshErr)
 		retErr = fmt.Errorf("获取工具列表失败: %v", refreshErr)
 		return retErr
@@ -517,6 +528,9 @@ func (conn *MCPServerConnection) refreshTools(ctx context.Context) error {
 		return fmt.Errorf("MCP客户端未初始化")
 	}
 
+	conn.requestMu.Lock()
+	defer conn.requestMu.Unlock()
+
 	// 获取工具列表
 	listRequest := mcp.ListToolsRequest{}
 	toolsResult, err := mcpClient.ListTools(ctx, listRequest)
@@ -525,7 +539,7 @@ func (conn *MCPServerConnection) refreshTools(ctx context.Context) error {
 	}
 
 	tools := filterMCPToolsByAllowList(toolsResult.Tools, allowedTools)
-	convertedTools := ConvertMcpToolListToInvokableToolList(tools, serverName, mcpClient)
+	convertedTools := ConvertMcpToolListToInvokableToolList(tools, serverName, mcpClient, &conn.requestMu)
 
 	conn.mu.Lock()
 	conn.tools = convertedTools
@@ -538,9 +552,13 @@ func (conn *MCPServerConnection) refreshTools(ctx context.Context) error {
 	return nil
 }
 
-func ConvertMcpToolListToInvokableToolList(tools []mcp.Tool, serverName string, client *client.Client) map[string]tool.InvokableTool {
+func ConvertMcpToolListToInvokableToolList(tools []mcp.Tool, serverName string, client *client.Client, requestMu ...*sync.Mutex) map[string]tool.InvokableTool {
 	invokeTools := make(map[string]tool.InvokableTool)
 	usedNames := make(map[string]string, len(tools))
+	var sharedRequestMu *sync.Mutex
+	if len(requestMu) > 0 {
+		sharedRequestMu = requestMu[0]
+	}
 	for _, tool := range tools {
 		originName := tool.Name
 		if strings.TrimSpace(originName) == "" {
@@ -573,6 +591,7 @@ func ConvertMcpToolListToInvokableToolList(tools []mcp.Tool, serverName string, 
 			originName: originName,
 			serverName: serverName,
 			client:     client,
+			requestMu:  sharedRequestMu,
 		}
 		invokeTools[llmName] = mcpToolInstance
 	}
@@ -792,11 +811,19 @@ func (g *GlobalMCPManager) monitorConnections() {
 			// 执行ping检测
 			g.mu.RLock()
 			for name, conn := range g.servers {
+				if conn == nil || !conn.tryBeginPing() {
+					continue
+				}
 				go func(name string, conn *MCPServerConnection) {
+					defer conn.finishPing()
 					ctx, cancel := context.WithTimeout(context.Background(), globalMCPPingTimeout)
 					defer cancel()
 
 					if err := conn.ping(ctx); err != nil {
+						if errors.Is(err, errMCPRequestBusy) {
+							log.Debugf("MCP服务器 %s 正在处理其他请求，跳过本轮ping", name)
+							return
+						}
 						log.Warnf("MCP服务器 %s ping失败，开始重连: %v", name, err)
 						// ping失败时直接标记为断开并触发重连
 						conn.mu.Lock()
@@ -892,6 +919,22 @@ func (g *GlobalMCPManager) reconnectServer(serverName string) (*client.Client, e
 	return mcpClient, nil
 }
 
+func (conn *MCPServerConnection) tryBeginPing() bool {
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if conn.pinging || conn.reconnecting || conn.client == nil {
+		return false
+	}
+	conn.pinging = true
+	return true
+}
+
+func (conn *MCPServerConnection) finishPing() {
+	conn.mu.Lock()
+	conn.pinging = false
+	conn.mu.Unlock()
+}
+
 // ping 发送ping请求检测连接状态
 func (conn *MCPServerConnection) ping(ctx context.Context) error {
 	conn.mu.RLock()
@@ -900,6 +943,11 @@ func (conn *MCPServerConnection) ping(ctx context.Context) error {
 	if mcpClient == nil {
 		return fmt.Errorf("client未初始化")
 	}
+
+	if !conn.requestMu.TryLock() {
+		return errMCPRequestBusy
+	}
+	defer conn.requestMu.Unlock()
 
 	// 使用空的Ping请求作为ping
 	err := mcpClient.Ping(ctx)
