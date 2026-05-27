@@ -24,6 +24,12 @@ chat_hooks:
     drop_when_full: false
     timeout_ms: 200
   plugins:
+    asr_noise_filter:
+      enabled: true
+      priority: 10
+      min_voice_duration_ms: 300
+      drop_phrases: ["嗯", "嗯嗯", "啊", "啊啊", "呃", "额", "唔", "哦", "噢", "标点符号", "标识符号", "句号", "逗号"]
+      keep_phrases: ["好", "对", "是", "停", "开", "关", "不"]
     statistic_plugin:
       enabled: true
       priority: 100

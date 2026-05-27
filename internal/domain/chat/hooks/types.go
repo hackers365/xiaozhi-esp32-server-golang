@@ -116,8 +116,9 @@ func ValidateEventKind(event string, kind PluginKind) error {
 }
 
 type ASROutputData struct {
-	Text          string
-	SpeakerResult *speaker.IdentifyResult
+	Text            string
+	SpeakerResult   *speaker.IdentifyResult
+	VoiceDurationMs int64
 }
 
 type LLMInputData struct {

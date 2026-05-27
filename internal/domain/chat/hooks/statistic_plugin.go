@@ -68,13 +68,16 @@ func BuiltinRegistrations() []Registration {
 		Kind:        PluginKindInterceptor,
 		Stage:       EventChatMetric,
 	}
-	return []Registration{{
-		Meta:      meta,
-		Lifecycle: plugin,
-		Register: func(hub *Hub, meta PluginMeta) error {
-			return hub.RegisterInterceptor(EventChatMetric, meta, plugin.onMetricSync)
+	return []Registration{
+		newASRNoiseFilterRegistration(),
+		{
+			Meta:      meta,
+			Lifecycle: plugin,
+			Register: func(hub *Hub, meta PluginMeta) error {
+				return hub.RegisterInterceptor(EventChatMetric, meta, plugin.onMetricSync)
+			},
 		},
-	}}
+	}
 }
 
 func (p *statisticPlugin) onMetricSync(ctx Context, payload any) (any, bool, error) {

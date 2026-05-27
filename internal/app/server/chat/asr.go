@@ -771,6 +771,7 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 			}
 
 			if text != "" {
+				voiceDurationMs := state.Vad.GetVoiceDurationInSession()
 				asrFinalTs := time.Now().UnixMilli()
 				state.MarkAsrFinalTextAt(asrFinalTs)
 				if a.session != nil {
@@ -784,23 +785,6 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 				emptyResultCount = 0
 				recoverableErrorWindowStart = time.Now()
 				recoverableErrorCount = 0
-
-				//如果是realtime模式下，需要停止 当前的llm和tts
-				if state.IsRealTime() && viper.GetInt("chat.realtime_mode") == 2 {
-					shouldInterrupt := true
-					if a.session != nil && a.session.isRealtimeMcpAudioGateActive() {
-						shouldInterrupt = false
-						log.Debugf("设备 %s realtime媒体播放门控激活，延后到ASR final门控判定，跳过ASR结果打断", state.DeviceID)
-					}
-					if shouldInterrupt {
-						log.Debugf("OnListenStart realtime模式下, 停止当前的llm和tts")
-						if a.session != nil {
-							a.session.StopAssistantOutputAfterAsrWithReason(true, "ASRManager.StartAsrRecognitionLoop realtime_mode=2 ASR result interrupt")
-						} else {
-							state.AfterAsrSessionCtx.CancelWithReason("ASRManager.StartAsrRecognitionLoop: realtime_mode=2 ASR result interrupt")
-						}
-					}
-				}
 
 				// 重置重试计数器
 				startIdleTime = time.Now().Unix()
@@ -816,7 +800,7 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 				}
 
 				if a.session != nil {
-					payload, stop, hookErr := a.session.hookHub.EmitASROutput(a.session.hookContext(ctx), chathooks.ASROutputData{Text: text, SpeakerResult: speakerResult})
+					payload, stop, hookErr := a.session.hookHub.EmitASROutput(a.session.hookContext(ctx), chathooks.ASROutputData{Text: text, SpeakerResult: speakerResult, VoiceDurationMs: voiceDurationMs})
 					if hookErr != nil {
 						log.Warnf("ASR_OUTPUT hook 执行失败: %v", hookErr)
 					}
@@ -860,6 +844,23 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 						}
 						startAudioIdle()
 						continue
+					}
+				}
+
+				//如果是realtime模式下，需要停止 当前的llm和tts
+				if state.IsRealTime() && viper.GetInt("chat.realtime_mode") == 2 {
+					shouldInterrupt := true
+					if a.session != nil && a.session.isRealtimeMcpAudioGateActive() {
+						shouldInterrupt = false
+						log.Debugf("设备 %s realtime媒体播放门控激活，延后到ASR final门控判定，跳过ASR结果打断", state.DeviceID)
+					}
+					if shouldInterrupt {
+						log.Debugf("OnListenStart realtime模式下, 停止当前的llm和tts")
+						if a.session != nil {
+							a.session.StopAssistantOutputAfterAsrWithReason(true, "ASRManager.StartAsrRecognitionLoop realtime_mode=2 ASR result interrupt")
+						} else {
+							state.AfterAsrSessionCtx.CancelWithReason("ASRManager.StartAsrRecognitionLoop: realtime_mode=2 ASR result interrupt")
+						}
 					}
 				}
 
