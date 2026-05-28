@@ -156,6 +156,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 			effectiveVadProviderName = configProvider
 		}
 		isSileroVAD := effectiveVadProviderName == "silero_vad"
+		keepVadStateBetweenFrames := isSileroVAD || effectiveVadProviderName == "ten_vad"
 		releaseVad := func(reason string) {
 			if vadWrapper == nil {
 				return
@@ -285,7 +286,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 
 						//如果已经检测到语音, 则不进行vad检测, 直接将pcmData传给asr
 						// 使用循环外获取的VAD资源进行检测
-						if !isSileroVAD {
+						if !keepVadStateBetweenFrames {
 							vadLastUseAt = time.Now()
 							if err := vadProvider.Reset(); err != nil {
 								log.Errorf("重置vad失败: %v", err)

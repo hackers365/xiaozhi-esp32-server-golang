@@ -128,6 +128,7 @@ vad:
   silero_vad:
     model_path: "config/models/vad/silero_vad.onnx"  # 模型文件路径
     threshold: 0.5                    # 检测阈值
+    threshold_low: 0.35               # 退出语音阈值，低于该值切换为静音；介于 threshold_low 和 threshold 之间保持上一状态
     min_silence_duration_ms: 100      # 最小静默时间（毫秒）
     sample_rate: 16000                # 采样率
     channels: 1                       # 声道数
@@ -137,6 +138,7 @@ vad:
   ten_vad:
     hop_size: 512                     # 帧移大小
     threshold: 0.4                    # VAD检测阈值
+    threshold_low: 0.25               # 退出语音阈值，低于该值切换为静音；介于 threshold_low 和 threshold 之间保持上一状态
     pool_size: 10                     # 资源池大小
     acquire_timeout_ms: 3000          # 获取超时时间（毫秒）
 

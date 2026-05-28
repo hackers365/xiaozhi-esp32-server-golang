@@ -45,8 +45,11 @@
       <el-form-item label="模型路径" prop="silero_vad.model_path">
         <el-input v-model="model.silero_vad.model_path" placeholder="请输入模型文件路径" />
       </el-form-item>
-      <el-form-item label="阈值" prop="silero_vad.threshold">
+      <el-form-item label="进入阈值" prop="silero_vad.threshold">
         <el-input-number v-model="model.silero_vad.threshold" :min="0" :max="1" :step="0.1" :precision="2" style="width: 100%" />
+      </el-form-item>
+      <el-form-item label="退出阈值" prop="silero_vad.threshold_low">
+        <el-input-number v-model="model.silero_vad.threshold_low" :min="0" :max="1" :step="0.1" :precision="2" style="width: 100%" />
       </el-form-item>
       <el-form-item label="最小静音持续时间(ms)" prop="silero_vad.min_silence_duration_ms">
         <el-input-number v-model="model.silero_vad.min_silence_duration_ms" :min="10" :max="5000" style="width: 100%" />
@@ -77,9 +80,13 @@
         <el-input-number v-model="model.ten_vad.hop_size" :min="128" :max="1024" style="width: 100%" />
         <div style="font-size: 12px; color: #909399; margin-top: 4px;">默认：320</div>
       </el-form-item>
-      <el-form-item label="VAD检测阈值" prop="ten_vad.threshold">
+      <el-form-item label="进入阈值" prop="ten_vad.threshold">
         <el-input-number v-model="model.ten_vad.threshold" :min="0" :max="1" :step="0.1" :precision="2" style="width: 100%" />
         <div style="font-size: 12px; color: #909399; margin-top: 4px;">推荐值：0.3</div>
+      </el-form-item>
+      <el-form-item label="退出阈值" prop="ten_vad.threshold_low">
+        <el-input-number v-model="model.ten_vad.threshold_low" :min="0" :max="1" :step="0.1" :precision="2" style="width: 100%" />
+        <div style="font-size: 12px; color: #909399; margin-top: 4px;">推荐值：0.2</div>
       </el-form-item>
       <el-form-item label="连接池大小" prop="ten_vad.pool_size">
         <el-input-number v-model="model.ten_vad.pool_size" :min="1" :max="100" style="width: 100%" />
