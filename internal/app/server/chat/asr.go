@@ -17,6 +17,7 @@ import (
 	chathooks "xiaozhi-esp32-server-golang/internal/domain/chat/hooks"
 	"xiaozhi-esp32-server-golang/internal/domain/speaker"
 	"xiaozhi-esp32-server-golang/internal/domain/vad/inter"
+	powervad "xiaozhi-esp32-server-golang/internal/domain/vad/power"
 	"xiaozhi-esp32-server-golang/internal/pool"
 	log "xiaozhi-esp32-server-golang/logger"
 
@@ -268,46 +269,48 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 				}
 
 				if !skipVad && needVad {
-					if !ensureVad() {
-						continue
-					}
-					//decode opus to pcm
-					state.AsrAudioBuffer.AddAsrAudioData(pcmData)
-
-					// 计算 VAD 需要的最小数据量
-					vadNeedMinSize := frameSize
-
-					if state.AsrAudioBuffer.GetAsrDataSize() >= vadNeedMinSize {
-						if isSileroVAD {
-							vadPcmData = pcmData
-						} else {
-							vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount, frameSize)
-						}
-
-						//如果已经检测到语音, 则不进行vad检测, 直接将pcmData传给asr
-						// 使用循环外获取的VAD资源进行检测
-						if !keepVadStateBetweenFrames {
-							vadLastUseAt = time.Now()
-							if err := vadProvider.Reset(); err != nil {
-								log.Errorf("重置vad失败: %v", err)
-								continue
-							}
-						}
-
-						// 进行VAD检测
-						vadLastUseAt = time.Now()
-						haveVoice, err = vadProvider.IsVADExt(vadPcmData, audioFormat.SampleRate, frameSize)
-						if err != nil {
-							log.Errorf("processAsrAudio VAD检测失败: %v", err)
+					if !shouldSkipSileroByPower(isSileroVAD, clientHaveVoice, pcmData) {
+						if !ensureVad() {
 							continue
 						}
+						//decode opus to pcm
+						state.AsrAudioBuffer.AddAsrAudioData(pcmData)
 
-						//首次触发识别到语音时,为了语音数据完整性 将vadPcmData赋值给pcmData, 之后的音频数据全部进入asr
-						if haveVoice && !clientHaveVoice {
-							//首次检测到语音时，最多只保留200ms的前静音数据
-							currentFrameSamples := len(pcmData)
-							allData := state.AsrAudioBuffer.GetAndClearAllData()
-							pcmData = trimFirstSpeechAudio(allData, currentFrameSamples, audioFormat.SampleRate, audioFormat.Channels)
+						// 计算 VAD 需要的最小数据量
+						vadNeedMinSize := frameSize
+
+						if state.AsrAudioBuffer.GetAsrDataSize() >= vadNeedMinSize {
+							if isSileroVAD {
+								vadPcmData = pcmData
+							} else {
+								vadPcmData = state.AsrAudioBuffer.GetAsrData(vadNeedGetCount, frameSize)
+							}
+
+							//如果已经检测到语音, 则不进行vad检测, 直接将pcmData传给asr
+							// 使用循环外获取的VAD资源进行检测
+							if !keepVadStateBetweenFrames {
+								vadLastUseAt = time.Now()
+								if err := vadProvider.Reset(); err != nil {
+									log.Errorf("重置vad失败: %v", err)
+									continue
+								}
+							}
+
+							// 进行VAD检测
+							vadLastUseAt = time.Now()
+							haveVoice, err = vadProvider.IsVADExt(vadPcmData, audioFormat.SampleRate, frameSize)
+							if err != nil {
+								log.Errorf("processAsrAudio VAD检测失败: %v", err)
+								continue
+							}
+
+							//首次触发识别到语音时,为了语音数据完整性 将vadPcmData赋值给pcmData, 之后的音频数据全部进入asr
+							if haveVoice && !clientHaveVoice {
+								//首次检测到语音时，最多只保留200ms的前静音数据
+								currentFrameSamples := len(pcmData)
+								allData := state.AsrAudioBuffer.GetAndClearAllData()
+								pcmData = trimFirstSpeechAudio(allData, currentFrameSamples, audioFormat.SampleRate, audioFormat.Channels)
+							}
 						}
 					}
 					//log.Debugf("isVad, pcmData len: %d, vadPcmData len: %d, haveVoice: %v", len(pcmData), len(vadPcmData), haveVoice)
@@ -1075,6 +1078,10 @@ func trimFirstSpeechAudio(allData []float32, currentFrameSamples, sampleRate, ch
 	audio := make([]float32, keepSamples)
 	copy(audio, allData[len(allData)-keepSamples:])
 	return audio
+}
+
+func shouldSkipSileroByPower(isSileroVAD, clientHaveVoice bool, pcmData []float32) bool {
+	return isSileroVAD && !clientHaveVoice && powervad.IsSilent(pcmData)
 }
 
 // getSpeakerResult 获取暂存的声纹结果（带超时）
