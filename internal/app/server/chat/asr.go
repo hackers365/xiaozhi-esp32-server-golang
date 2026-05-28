@@ -809,11 +809,24 @@ func (a *ASRManager) StartAsrRecognitionLoop(
 					if stop {
 						log.Infof("ASR_OUTPUT hook 请求停止当前流程")
 						state.Asr.ClearHistoryAudio()
-						if state.UsesAudioIdleClock() {
-							startAudioIdle()
-						} else {
-							state.ResetAudioIdleWindow()
+
+						if !state.IsRealTime() {
+							if state.UsesAudioIdleClock() {
+								startAudioIdle()
+							} else {
+								state.ResetAudioIdleWindow()
+							}
+							return
 						}
+
+						if restartErr := a.RestartAsrRecognition(ctx); restartErr != nil {
+							log.Errorf("ASR_OUTPUT hook 停止流程后重启识别失败: %v", restartErr)
+							if onError != nil {
+								onError(restartErr)
+							}
+							return
+						}
+						startAudioIdle()
 						continue
 					}
 				}
