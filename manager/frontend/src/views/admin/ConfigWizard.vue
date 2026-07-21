@@ -235,6 +235,13 @@ const asrForm = reactive({
   name: 'FunASR ASR',
   config_id: 'funasr_default',
   provider: 'funasr',
+  local_asr_server: {
+    host: '127.0.0.1',
+    port: 9000,
+    ws_url: 'ws://127.0.0.1:9000/ws',
+    sample_rate: 16000,
+    timeout: 30
+  },
   funasr: {
     host: '127.0.0.1',
     port: 10095,

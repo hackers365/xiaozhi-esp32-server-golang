@@ -9,7 +9,7 @@ var knownProviders = map[string]map[string]struct{}{
 		"ten_vad": {}, "webrtc_vad": {}, "silero_vad": {},
 	},
 	"asr": {
-		"funasr": {}, "aliyun_funasr": {}, "doubao": {}, "aliyun_qwen3": {}, "xunfei": {},
+		"funasr": {}, "aliyun_funasr": {}, "doubao": {}, "aliyun_qwen3": {}, "xunfei": {}, "local_asr_server": {},
 	},
 	"llm": {
 		"openai": {}, "ollama": {}, "azure": {}, "anthropic": {}, "zhipu": {}, "aliyun": {},
@@ -210,6 +210,9 @@ func inferVADProvider(data map[string]interface{}) string {
 }
 
 func inferASRProvider(data map[string]interface{}) string {
+	if hasAny(data, "local_asr_server") {
+		return "local_asr_server"
+	}
 	if hasAny(data, "appid", "api_secret") {
 		return "xunfei"
 	}

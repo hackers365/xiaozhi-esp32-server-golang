@@ -3,6 +3,7 @@
     <el-form-item label="提供商" prop="provider">
       <el-select v-model="model.provider" placeholder="请选择提供商" style="width: 100%" @change="onProviderChange">
         <el-option label="FunASR" value="funasr" />
+        <el-option label="Local ASR Server (Sherpa-ONNX)" value="local_asr_server" />
         <el-option label="Aliyun FunASR" value="aliyun_funasr" />
         <el-option label="豆包" value="doubao" />
         <el-option label="Aliyun Qwen3" value="aliyun_qwen3" />
@@ -63,6 +64,30 @@
           <el-icon><InfoFilled /></el-icon>
           确保FunASR已进行相应配置
         </div>
+      </el-form-item>
+    </div>
+    <div v-if="model.provider === 'local_asr_server'">
+      <el-form-item label="主机地址" prop="local_asr_server.host">
+        <el-input v-model="model.local_asr_server.host" placeholder="127.0.0.1" />
+      </el-form-item>
+      <el-form-item label="端口" prop="local_asr_server.port">
+        <el-input-number v-model="model.local_asr_server.port" :min="1" :max="65535" style="width: 100%" />
+      </el-form-item>
+      <el-form-item label="WS URL" prop="local_asr_server.ws_url">
+        <el-input v-model="model.local_asr_server.ws_url" placeholder="ws://127.0.0.1:9000/ws" />
+        <div class="form-tip">
+          <el-icon><InfoFilled /></el-icon>
+          如果设置了 WS URL，将优先使用该完整的 WebSocket 地址
+        </div>
+      </el-form-item>
+      <el-form-item label="采样率" prop="local_asr_server.sample_rate">
+        <el-select v-model="model.local_asr_server.sample_rate" placeholder="请选择采样率" style="width: 100%">
+          <el-option label="16000" :value="16000" />
+          <el-option label="8000" :value="8000" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="超时时间(秒)" prop="local_asr_server.timeout">
+        <el-input-number v-model="model.local_asr_server.timeout" :min="1" style="width: 100%" />
       </el-form-item>
     </div>
     <div v-if="model.provider === 'aliyun_funasr'">
@@ -251,6 +276,17 @@ const props = defineProps({
 const formRef = ref()
 
 const ASR_PROVIDER_DEFAULTS = {
+  local_asr_server: {
+    name: 'Local ASR Server (Sherpa-ONNX)',
+    config_id: 'local_asr_server_default',
+    data: {
+      host: '127.0.0.1',
+      port: 9000,
+      ws_url: 'ws://127.0.0.1:9000/ws',
+      sample_rate: 16000,
+      timeout: 30
+    }
+  },
   funasr: {
     name: 'FunASR ASR',
     config_id: 'funasr_default',
@@ -393,6 +429,7 @@ watch(() => props.model?.provider, (provider) => {
 
 function getJsonData() {
   const m = props.model
+  if (m.provider === 'local_asr_server') return JSON.stringify(m.local_asr_server || {})
   if (m.provider === 'funasr') return JSON.stringify(m.funasr || {})
   if (m.provider === 'aliyun_funasr') return JSON.stringify(m.aliyun_funasr || {})
   if (m.provider === 'doubao') return JSON.stringify(m.doubao || {})

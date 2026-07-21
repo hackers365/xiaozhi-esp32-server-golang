@@ -15,7 +15,7 @@
 - **mqtt_server**：内置 MQTT 服务器参数（可选 TLS）。
 - **udp**：UDP 服务器相关参数。
 - **vad**：语音活动检测（VAD）相关配置，支持 webrtc_vad/silero_vad。
-- **asr**：自动语音识别（ASR）配置，支持 funasr / aliyun_funasr / doubao。
+- **asr**：自动语音识别（ASR）配置，支持 funasr / aliyun_funasr / doubao / local_asr_server。
 - **tts**：语音合成（TTS）配置，支持多种引擎（doubao, edge, xiaozhi等）。
 - **llm**：大语言模型（LLM）配置，支持多种 OpenAI 兼容模型。
 - **vision**：视觉模型相关配置。
@@ -130,7 +130,13 @@ vad:
 
 # 自动语音识别（ASR）配置
 asr:
-  provider: "funasr"  # funasr / aliyun_funasr / doubao
+  provider: "funasr"  # funasr / aliyun_funasr / doubao / local_asr_server
+  local_asr_server:
+    host: "127.0.0.1"
+    port: "9000"
+    ws_url: "ws://127.0.0.1:9000/ws"
+    sample_rate: 16000
+    timeout: 30
   funasr:
     host: "127.0.0.1"
     port: "10096"
