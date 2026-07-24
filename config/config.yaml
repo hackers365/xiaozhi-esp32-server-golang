@@ -24,6 +24,12 @@ chat_hooks:
     drop_when_full: false
     timeout_ms: 200
   plugins:
+    asr_noise_filter:
+      enabled: true
+      priority: 10
+      min_voice_duration_ms: 300
+      drop_phrases: ["嗯", "嗯嗯", "啊", "啊啊", "呃", "额", "唔", "哦", "噢", "标点符号", "标识符号", "句号", "逗号"]
+      keep_phrases: ["好", "对", "是", "停", "开", "关", "不"]
     statistic_plugin:
       enabled: true
       priority: 100
@@ -122,6 +128,7 @@ vad:
   silero_vad:
     model_path: "config/models/vad/silero_vad.onnx"  # 模型文件路径
     threshold: 0.5                    # 检测阈值
+    threshold_low: 0.35               # 退出语音阈值，低于该值切换为静音；介于 threshold_low 和 threshold 之间保持上一状态
     min_silence_duration_ms: 100      # 最小静默时间（毫秒）
     sample_rate: 16000                # 采样率
     channels: 1                       # 声道数
@@ -131,6 +138,7 @@ vad:
   ten_vad:
     hop_size: 512                     # 帧移大小
     threshold: 0.4                    # VAD检测阈值
+    threshold_low: 0.25               # 退出语音阈值，低于该值切换为静音；介于 threshold_low 和 threshold 之间保持上一状态
     pool_size: 10                     # 资源池大小
     acquire_timeout_ms: 3000          # 获取超时时间（毫秒）
 

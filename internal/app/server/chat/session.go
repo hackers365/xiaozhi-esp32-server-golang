@@ -242,6 +242,18 @@ func NewChatSession(clientState *ClientState, serverTransport *ServerTransport, 
 
 	// 设置 ASR 首次返回字符的回调
 	clientState.OnAsrFirstTextCallback = func(text string, isFinal bool) {
+		voiceDurationMs := clientState.Vad.GetVoiceDurationInSession()
+		if drop, reason := chathooks.ShouldDropConfiguredASRNoiseText(text, voiceDurationMs); drop {
+			log.Infof(
+				"ASR首文本噪声过滤命中，跳过首字状态和realtime打断: device=%s, reason=%s, voice_duration_ms=%d, text=%q, isFinal=%v",
+				clientState.DeviceID,
+				reason,
+				voiceDurationMs,
+				text,
+				isFinal,
+			)
+			return
+		}
 		clientState.Asr.MarkTextReceived()
 		clientState.ClearAudioIdleTimeoutPending()
 		clientState.PauseAudioIdleWindow(time.Now())
