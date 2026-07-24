@@ -1,0 +1,368 @@
+server:
+  pprof:
+    enable: true
+    port: 6060
+
+auth:
+  enable: false
+
+keepalive_client:
+  shijingbo: true     # 需要保活的客户端id
+
+chat:
+  max_idle_duration: 30000
+  chat_max_silence_duration: 300
+  realtime_mode: 4 # 1: vad打断模式 2: asr打断模式 3: asr时识别到声纹时进行打断 4. asr出结果打断(兼容流式或离线)
+
+chat_hooks:
+  enabled: true
+  async:
+    queue_size: 1024
+    worker_count: 1
+    drop_when_full: false
+    timeout_ms: 200
+  plugins:
+    asr_noise_filter:
+      enabled: true
+      priority: 10
+      min_voice_duration_ms: 300
+      drop_phrases: ["嗯", "嗯嗯", "啊", "啊啊", "呃", "额", "唔", "哦", "噢", "标点符号", "标识符号", "句号", "逗号"]
+      keep_phrases: ["好", "对", "是", "停", "开", "关", "不"]
+    statistic_plugin:
+      enabled: true
+      priority: 100
+
+config_provider:          #对应domain/config/中的provider
+  type: "manager"         #现在可以是 manager, redis
+  enable_periodic_update: true  #是否启用周期性配置更新
+  update_interval: "30s"   #配置更新间隔，支持时间单位如 "5m", "1h", "30s"
+
+manager:                  #内控管理配置, 对应domain/config/manager/manager.go
+  backend_url: "http://192.168.209.138:8080" #内控地址
+  # 聊天历史记录配置
+  history_enabled: true      # 是否启用聊天历史记录
+  history_auth_token: ""     # 认证Token（可选）
+  history_enable_audio: true # 是否保存音频数据
+  history_timeout: 5s        # HTTP请求超时时间
+
+system_prompt: |
+  你是一个叫小智/小志的台湾女孩，说话机车，声音好听，习惯简短表达，爱用网络梗，不要冷场。
+  请注意，要像一个人一样说话，请不要回复表情符号。不要回复代码和xml标签。
+
+log:
+  path: "./logs/"
+  file: "server.log"
+  level: "debug"
+  max_age: 3
+  rotation_time: 10
+  stdout: false
+
+redis:
+  host: "192.168.208.214"
+  port: 6379
+  password: "ticket_dev"
+  db: 0
+  key_prefix: "xiaozhi"
+
+websocket:
+  host: "0.0.0.0"
+  port: 9990
+
+mqtt:
+  enable: false
+  broker: "192.168.208.214"
+  type: "tcp"
+  port: 2884
+  client_id: "xiaozhi_server"
+  username: "admin"
+  password: "shijingbo!@#"
+
+mqtt_server:
+  enable: false
+  listen_host: "0.0.0.0"
+  listen_port: 2884
+  username: "admin"
+  password: "shijingbo!@#"
+  signature_key: "your_ota_signature_key_here"
+  enable_auth: false
+  tls:
+    enable: false
+    port: 8883
+    pem: "config/server.pem"
+    key: "config/server.key"
+
+udp:
+  external_host: "192.168.208.214"
+  external_port: 9991
+  listen_host: "0.0.0.0"
+  listen_port: 9991
+
+# 资源池配置（所有资源类型共享默认配置）
+resource_pools:
+  max_size: 1000              # 最大资源数量
+  min_size: 1               # 最小资源数量（预创建）
+  max_idle: 50              # 最大空闲资源数量
+  acquire_timeout: 5s       # 获取资源超时时间
+  idle_timeout: 10m         # 资源空闲超时时间
+  validate_on_borrow: true  # 获取时是否验证资源
+  validate_on_return: true  # 归还时是否验证资源
+
+vad:
+  provider: "ten_vad"
+  webrtc_vad:
+    pool_min_size: 5
+    pool_max_size: 1000
+    pool_max_idle: 100
+    vad_sample_rate: 16000
+    vad_mode: 2
+  silero_vad:
+    model_path: "config/models/vad/silero_vad.onnx"
+    threshold: 0.5
+    min_silence_duration_ms: 100
+    sample_rate: 16000
+    channels: 1
+    acquire_timeout_ms: 3000
+  ten_vad:
+    hop_size: 512
+    threshold: 0.4
+    pool_size: 10
+    acquire_timeout_ms: 3000
+
+asr:
+  provider: "funasr"  # funasr / aliyun_funasr / doubao / local_asr_server
+  local_asr_server:
+    host: "127.0.0.1"
+    port: "9000"
+    ws_url: "ws://127.0.0.1:9000/ws"
+    sample_rate: 16000
+    timeout: 30
+  funasr:
+    host: "192.168.208.214"
+    port: "10096"
+    mode: "offline"
+    sample_rate: 16000
+    chunk_size: [5, 10, 5]
+    chunk_interval: 10
+    max_connections: 5
+    timeout: 30
+    auto_end: false
+  aliyun_funasr:
+    format: "pcm"
+    sample_rate: 16000
+    language_hints: ["zh"]
+    vocabulary_id: ""
+    disfluency_removal_enabled: false
+    timeout: 30
+
+  doubao:
+    appid: "6886011847"
+    access_token: "7z5YZc_zeUkUCViq2eaiQV5H5vxScuCQ"
+    ws_url: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream"
+    model_name: "bigmodel"
+    end_window_size: 800
+    enable_punc: true
+    enable_itn: true
+    enable_ddc: false
+    timeout: 30
+
+tts:
+  provider: "edge_offline"
+  openai:  #openai兼容格式的tts服务
+    api_key: "sk-mpydukayeqzpdvxugjrfqxfmtiwfxkmjbowruvkfvubnvcbm"
+    api_url: "https://api.siliconflow.cn/v1/audio/speech"
+    model: "FunAudioLLM/CosyVoice2-0.5B"
+    voice: "FunAudioLLM/CosyVoice2-0.5B:alex"
+    response_format: "mp3"
+    speed: 1.0
+    stream: true
+  doubao:
+    appid: "6886011847"
+    access_token: "7z5YZc_zeUkUCViq2eaiQV5H5vxScuCQ"
+    cluster: "volcano_tts"
+    voice: "BV001_streaming"
+    api_url: "https://openspeech.bytedance.com/api/v1/tts"
+    authorization: "Bearer;"
+  doubao_ws:
+    appid: "6886011847"
+    access_token: "7z5YZc_zeUkUCViq2eaiQV5H5vxScuCQ"
+    cluster: "volcano_tts"
+    voice: "zh_female_wanwanxiaohe_moon_bigtts"
+    ws_host: "openspeech.bytedance.com"
+    use_stream: true
+  cosyvoice:
+    api_url: "https://tts.linkerai.cn/tts"
+    spk_id: "OUeAo1mhq6IBExi"
+    frame_duration: 60
+    target_sr: 24000
+    audio_format: "mp3"
+    instruct_text: "你好"
+  edge:
+    voice: "zh-CN-XiaoxiaoNeural"
+    rate: "+0%"
+    volume: "+0%"
+    pitch: "+0Hz"
+    connect_timeout: 10
+    receive_timeout: 60
+  edge_offline:
+    server_url: "ws://192.168.208.214:8081/tts"
+    timeout: 30
+    sample_rate: 24000
+    channels: 1
+    frame_duration: 20
+  xiaozhi:
+    server_addr: "wss://api.tenclass.net/xiaozhi/v1/"
+    device_id: "ba:8f:17:de:94:94"
+    client_id: "e4b0c442-98fc-4e1b-8c3d-6a5b6a5b6a6d"
+    token: "test-token"
+
+llm:
+  provider: "qwen_72b"
+  proxy_qwen:
+    type: "openai"
+    model_name: "qwen-plus"
+    base_url: "https://api-model.onethingai.com/v1"
+    #base_url: "http://192.168.208.214:9000/v1"
+    api_key: "be08448b4ea8e3cb7ccbba36024d375d"
+    max_token: 500
+  custom_deepseek:
+    type: "openai"
+    model_name: "deepseek-ai/DeepSeek-V3"
+    api_key: "sk-mpydukayeqzpdvxugjrfqxfmtiwfxkmjbowruvkfvubnvcbm"
+    base_url: "http://192.168.208.214:8080/v1"
+    max_tokens: 500
+  deepseek:
+    type: "openai"
+    model_name: "Pro/deepseek-ai/DeepSeek-V3"
+    api_key: "sk-mpydukayeqzpdvxugjrfqxfmtiwfxkmjbowruvkfvubnvcbm"
+    base_url: "https://api.siliconflow.cn/v1"
+    max_tokens: 500
+  aliyun_deepseek:
+    type: "openai"
+    model_name: "deepseek-v3"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api_key: "sk-7de88fb785ff441e8b31be964ecbff4f"
+    max_token: 500
+  deepseek0528:
+    type: "openai"
+    model_name: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+    api_key: "sk-mpydukayeqzpdvxugjrfqxfmtiwfxkmjbowruvkfvubnvcbm"
+    base_url: "https://api.siliconflow.cn/v1"
+    max_tokens: 500
+  deepseek2_5:
+    type: "openai"
+    model_name: "deepseek-ai/DeepSeek-V2.5"
+    api_key: "sk-mpydukayeqzpdvxugjrfqxfmtiwfxkmjbowruvkfvubnvcbm"
+    base_url: "https://api.siliconflow.cn/v1"
+    max_tokens: 500
+  qwen_72b:
+    type: "openai"
+    model_name: "Qwen/Qwen2.5-72B-Instruct"
+    api_key: "sk-mpydukayeqzpdvxugjrfqxfmtiwfxkmjbowruvkfvubnvcbm"
+    base_url: "https://api.siliconflow.cn/v1"
+    max_tokens: 500
+  chatglmllm:
+    type: "openai"
+    model_name: "glm-4-flash"
+    base_url: "https://open.bigmodel.cn/api/paas/v4/"
+    api_key: "4202c82d1e3f4839a0ce8931d3acd54f.8KzxIWFsI1QpUBgP"
+    max_tokens: 500
+  aliyun_qwen:
+    type: "openai"
+    model_name: "qwen-plus-2025-09-11"
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api_key: "sk-c9edb429cbb44953be283f839517ffcb"
+    max_token: 500
+    streamable: true
+  doubao_deepseek:
+    type: "openai"
+    model_name: "deepseek-v3-250324"
+    api_key: "a80fbac6-889e-4d68-8bae-b26da2b85d13"
+    base_url: "https://ark.cn-beijing.volces.com/api/v3"
+    max_tokens: 500
+
+# Memory 记忆配置
+memory:
+  provider: "nomemo"  # 记忆提供商
+  # LLM Memory 配置（短期对话记忆）
+  nomemo:
+  # Memobase 配置（长期记忆存储）
+  memobase:
+    base_url: "https://api.memobase.dev"              # Memobase项目URL
+    api_key: "sk-proj-ece4e3720b48976e-616fc8c0b9bb690aa62a872bd7986605"             # Memobase API密钥
+    api_version: "v1"                                 # API版本
+    enable_search: true         #允许在调用llm之前搜索memory,会有200ms左右延迟
+    search_threshold: 0.5       #搜索阈值,0.5表示只有当搜索到的memory与用户输入的相似度超过0.5时,才会将其加入到llm的输入中
+    search_top_k: 3             #搜索TopK,表示搜索到的memory中,相似度最高的TopK个memory会被加入到llm的输入中
+
+  mem0:
+    base_url: "https://api.mem0.ai"
+    api_key: "m0-1wHmTD2cB0m00zEqOCGOMHHPIcXEZREAhrM9rPbQ"
+    enable_search: true         #允许在调用llm之前搜索memory,会有200ms左右延迟
+    search_threshold: 0.5       #搜索阈值,0.5表示只有当搜索到的memory与用户输入的相似度超过0.5时,才会将其加入到llm的输入中
+    search_top_k: 3             #搜索TopK,表示搜索到的memory中,相似度最高的TopK个memory会被加入到llm的输入中
+
+vision:
+  enable_auth: false
+  vision_url: "https://www.tb263.cn:55555/go_ws/xiaozhi/api/vision"
+  vllm:
+    provider: "aliyun_vision"
+    aliyun_vision:
+      type: "openai"
+      model_name: "qwen-vl-plus-latest"
+      base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      api_key: "sk-7de88fb785ff441e8b31be964ecbff4f"
+      max_token: 500
+    doubao_vision:
+      type: "openai"
+      model_name: "doubao-1.5-vision-lite-250315"
+      api_key: "a80fbac6-889e-4d68-8bae-b26da2b85d13"
+      base_url: "https://ark.cn-beijing.volces.com/api/v3"
+      max_tokens: 500
+
+ota:
+  signature_key: "mqtt_key"
+  test:
+    websocket:
+      url: "ws://192.168.208.214:8990/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "192.168.208.214:2884"
+  external:
+    websocket:
+      url: "ws://192.168.208.214:8990/xiaozhi/v1/"
+    mqtt:
+      enable: false
+      endpoint: "192.168.208.214:2884"
+
+mcp:
+  global:
+    enabled: false
+    servers:
+      - name: "global_mcp_streamablehttp"
+        type: "streamablehttp"
+        url: "http://192.168.208.214:3001/mcp"
+        enabled: true
+    reconnect_interval: 300
+    max_reconnect_attempts: 10
+
+local_mcp:
+  exit_conversation: true
+  clear_conversation_history: false
+  play_music: false
+
+enable_greeting: true
+
+greeting_list:
+  - "你好，我是小智，很高兴认识你。"
+  - "你好，我是小智，今天有啥好玩的。"
+  - "你好，我是小智，有什么需要帮助的。"
+
+wakeup_words:
+  - "小智"
+  - "小知"
+  - "你好小智"
+
+voice_identify:
+  enable: true
+  base_url: "http://192.168.208.214:8080"
+  threshold: 0.6  # 声纹识别阈值，范围 0.0-1.0，默认 0.6

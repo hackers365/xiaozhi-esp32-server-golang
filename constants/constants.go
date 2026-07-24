@@ -7,11 +7,12 @@ const (
 )
 
 const (
-	AsrTypeFunAsr       = "funasr"
-	AsrTypeDoubao       = "doubao"
-	AsrTypeAliyunFunASR = "aliyun_funasr"
-	AsrTypeAliyunQwen3  = "aliyun_qwen3"
-	AsrTypeXunfei       = "xunfei"
+	AsrTypeFunAsr          = "funasr"
+	AsrTypeDoubao          = "doubao"
+	AsrTypeAliyunFunASR    = "aliyun_funasr"
+	AsrTypeAliyunQwen3     = "aliyun_qwen3"
+	AsrTypeXunfei          = "xunfei"
+	AsrTypeLocalAsrServer = "local_asr_server"
 )
 
 const (

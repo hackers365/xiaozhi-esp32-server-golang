@@ -136,7 +136,14 @@ vad:
 
 # 自动语音识别（ASR）配置
 asr:
-  provider: "funasr"  # ASR provider: funasr / aliyun_funasr / doubao / aliyun_qwen3 / xunfei
+  provider: "funasr"  # ASR provider: funasr / aliyun_funasr / doubao / aliyun_qwen3 / xunfei / local_asr_server
+  # 本地 Sherpa-ONNX / SenseVoice ASR Server 配置
+  local_asr_server:
+    host: "127.0.0.1"               # ASR服务器地址
+    port: "9000"                    # ASR服务器端口
+    ws_url: "ws://127.0.0.1:9000/ws" # WebSocket 地址 (若配置则优先使用)
+    sample_rate: 16000              # 采样率
+    timeout: 30                     # 超时时间（秒）
   # FunASR配置
   funasr:
     host: "127.0.0.1"          # FunASR服务器地址

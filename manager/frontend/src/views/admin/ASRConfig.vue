@@ -146,6 +146,13 @@ const form = reactive({
   provider: '',
   is_default: false,
   enabled: true,
+  local_asr_server: {
+    host: '127.0.0.1',
+    port: 9000,
+    ws_url: 'ws://127.0.0.1:9000/ws',
+    sample_rate: 16000,
+    timeout: 30
+  },
   funasr: {
     host: 'localhost',
     port: 10095,
@@ -212,6 +219,14 @@ const rules = computed(() => {
     name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
     config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
     provider: [{ required: true, message: '请选择提供商', trigger: 'change' }]
+  }
+  if (form.provider === 'local_asr_server') {
+    return {
+      ...base,
+      'local_asr_server.host': [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
+      'local_asr_server.port': [{ required: true, message: '请输入端口', trigger: 'blur' }],
+      'local_asr_server.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
+    }
   }
   if (form.provider === 'funasr') {
     return {
@@ -313,7 +328,11 @@ const editConfig = (config) => {
     const configObj = JSON.parse(config.json_data || '{}')
     
     // 兼容新旧格式：检查是否是包装格式（包含provider层）还是直接格式
-    if (configObj.funasr) {
+    if (configObj.local_asr_server) {
+      form.local_asr_server = { ...form.local_asr_server, ...configObj.local_asr_server }
+    } else if (config.provider === 'local_asr_server' && (configObj.host || configObj.ws_url)) {
+      form.local_asr_server = { ...form.local_asr_server, ...configObj }
+    } else if (configObj.funasr) {
       // 旧格式：包含provider层
       const funasrConfig = { ...form.funasr, ...configObj.funasr }
       // 兼容chunk_size：如果是单个数字或无效格式，转换为默认值 [5, 10, 5]

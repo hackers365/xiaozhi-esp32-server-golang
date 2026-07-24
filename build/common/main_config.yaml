@@ -147,6 +147,13 @@ asr:
     enable_itn: true                # 启用反向文本标准化
     enable_ddc: false               # 启用数字检测修正
     timeout: 30                     # 超时时间（秒）
+  # 本地 Sherpa-ONNX / SenseVoice ASR Server 配置
+  local_asr_server:
+    host: "127.0.0.1"               # ASR服务器地址
+    port: "9000"                    # ASR服务器端口
+    ws_url: "ws://127.0.0.1:9000/ws" # WebSocket 地址 (若配置则优先使用)
+    sample_rate: 16000              # 采样率
+    timeout: 30                     # 超时时间（秒）
 
 # 文本转语音（TTS）配置
 tts:
