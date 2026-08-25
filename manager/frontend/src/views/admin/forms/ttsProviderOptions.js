@@ -19,4 +19,4 @@ export const TTS_PROVIDER_OPTIONS = [
   supports_voice_clone: voiceCloneProviderSet.has(item.value)
 }))
 
-export const TTS_PROVIDERS_WITH_VOICES = ['minimax', 'edge', 'doubao', 'doubao_ws', 'zhipu', 'openai', 'indextts_vllm', 'xunfei_super_tts']
+export const TTS_PROVIDERS_WITH_VOICES = ['minimax', 'edge', 'doubao', 'doubao_ws', 'zhipu', 'openai', 'indextts_vllm', 'xunfei_super_tts', 'aliyun_qwen']

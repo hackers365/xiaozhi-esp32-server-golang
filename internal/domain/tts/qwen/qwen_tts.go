@@ -15,8 +15,10 @@ import (
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/data/audio"
+	"xiaozhi-esp32-server-golang/internal/domain/emotion"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
+	"xiaozhi-esp32-server-golang/pkg/aliyuntts"
 
 	"github.com/gopxl/beep"
 	sse "github.com/tmaxmax/go-sse"
@@ -66,20 +68,32 @@ type QwenTTSProvider struct {
 	Model         string
 	Voice         string
 	LanguageType  string
+	VoicePrompt   string
 	Stream        bool
 	FrameDuration int
+	Format        string
 }
 
 // qwenRequest 请求结构体
 type qwenRequest struct {
-	Model string           `json:"model"`
-	Input qwenRequestInput `json:"input"`
+	Model      string             `json:"model"`
+	Input      qwenRequestInput   `json:"input"`
+	Parameters *qwenRequestParams `json:"parameters,omitempty"`
 }
 
 type qwenRequestInput struct {
-	Text         string `json:"text"`
-	Voice        string `json:"voice"`
-	LanguageType string `json:"language_type,omitempty"`
+	Text                 string `json:"text"`
+	Voice                string `json:"voice,omitempty"`
+	LanguageType         string `json:"language_type,omitempty"`
+	Instructions         string `json:"instructions,omitempty"`
+	OptimizeInstructions bool   `json:"optimize_instructions,omitempty"`
+	Instruction          string `json:"instruction,omitempty"`
+	Format               string `json:"format,omitempty"`
+	SampleRate           int    `json:"sample_rate,omitempty"`
+}
+
+type qwenRequestParams struct {
+	ResponseFormat string `json:"response_format,omitempty"`
 }
 
 // qwenResponse 非流式/流式统一响应结构
@@ -122,6 +136,8 @@ func NewQwenTTSProvider(config map[string]interface{}) *QwenTTSProvider {
 	stream, _ := config["stream"].(bool)
 	frameDuration, _ := config["frame_duration"].(float64)
 	region, _ := config["region"].(string)
+	voicePrompt, _ := config["voice_prompt"].(string)
+	format, _ := config["format"].(string)
 
 	// 处理 API URL / 地域
 	if apiURL == "" {
@@ -136,14 +152,24 @@ func NewQwenTTSProvider(config map[string]interface{}) *QwenTTSProvider {
 	if model == "" {
 		model = defaultQwenModel
 	}
+	if voicePrompt != "" && model == defaultQwenModel {
+		model = "qwen3-tts-instruct-flash"
+	}
 	if voice == "" {
 		voice = defaultQwenVoice
 	}
-	if languageType == "" {
+	if languageType == "" && aliyuntts.GetAliyunModelCapability(model).SupportsLanguageType {
 		languageType = defaultQwenLanguageType
 	}
 	if frameDuration == 0 {
 		frameDuration = audio.FrameDuration
+	}
+	if format == "" {
+		if stream {
+			format = "pcm"
+		} else {
+			format = "wav"
+		}
 	}
 
 	return &QwenTTSProvider{
@@ -152,23 +178,148 @@ func NewQwenTTSProvider(config map[string]interface{}) *QwenTTSProvider {
 		Model:         model,
 		Voice:         voice,
 		LanguageType:  languageType,
+		VoicePrompt:   voicePrompt,
 		Stream:        stream,
 		FrameDuration: int(frameDuration),
+		Format:        format,
 	}
+}
+
+func buildQwenInstruction(cfg emotion.EmotionConfig) string {
+	if prompt := emotion.GetVoicePromptForEmotion(cfg.Emotion); prompt != "" {
+		return prompt
+	}
+	if cfg.VoiceStyle != "" && cfg.VoiceStyle != "default" {
+		return fmt.Sprintf("用%s的语气朗读", cfg.VoiceStyle)
+	}
+	return ""
+}
+
+func qwenSupportsAudioResponseFormat(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return false
+	}
+	if strings.Contains(model, "instruct") {
+		return false
+	}
+	return strings.HasPrefix(model, "qwen3-tts-flash")
+}
+
+func qwenRequestParamsFor(model string, format string, stream bool) *qwenRequestParams {
+	format = qwenAPIAudioFormat(format)
+	if format == "" || format == "pcm" || format == "wav" {
+		return nil
+	}
+	if format == "opus" {
+		if stream && qwenSupportsAudioResponseFormat(model) {
+			return &qwenRequestParams{ResponseFormat: format}
+		}
+		return nil
+	}
+	return &qwenRequestParams{ResponseFormat: format}
+}
+
+func qwenStreamDecoderFormat(model string, format string) string {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" {
+		return "pcm"
+	}
+	return format
+}
+
+func qwenAPIAudioFormat(format string) string {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "ogg_opus" {
+		return "opus"
+	}
+	return format
+}
+
+func prepareQwenHTTPRequest(model, format string, stream bool, input *qwenRequestInput) (*qwenRequestParams, error) {
+	capability := aliyuntts.GetAliyunModelCapability(model)
+	if capability.Category != aliyuntts.CategoryQwenAudio && capability.Category != aliyuntts.CategoryCosyVoice {
+		return qwenRequestParamsFor(model, format, stream), nil
+	}
+
+	input.LanguageType = ""
+	input.Instruction = input.Instructions
+	input.Instructions = ""
+	input.OptimizeInstructions = false
+	input.Format = qwenAPIAudioFormat(format)
+	if input.Format == "" {
+		if stream {
+			input.Format = "pcm"
+		} else {
+			input.Format = "wav"
+		}
+	}
+	input.SampleRate = capability.DefaultSampleRate
+	return nil, nil
+}
+
+func applyQwenExpression(model string, input *qwenRequestInput, voicePrompt string, emoCfg *emotion.EmotionConfig) string {
+	capability := aliyuntts.GetAliyunModelCapability(model)
+	hasEmotionInstruction := emoCfg != nil && buildQwenInstruction(*emoCfg) != ""
+	if capability.Category == aliyuntts.CategoryQwenTTS && !capability.SupportsInstruction && model == defaultQwenModel && (voicePrompt != "" || hasEmotionInstruction) {
+		model = "qwen3-tts-instruct-flash"
+		capability = aliyuntts.GetAliyunModelCapability(model)
+	}
+
+	if voicePrompt != "" && capability.SupportsInstruction {
+		input.Instructions = voicePrompt
+		input.OptimizeInstructions = true
+		if capability.EmotionMode != aliyuntts.EmotionInlineTag {
+			return model
+		}
+	}
+	if emoCfg == nil {
+		return model
+	}
+
+	switch capability.EmotionMode {
+	case aliyuntts.EmotionInstruction:
+		if capability.SupportsInstruction {
+			input.Instructions = buildQwenInstruction(*emoCfg)
+			input.OptimizeInstructions = input.Instructions != ""
+		}
+	case aliyuntts.EmotionInlineTag:
+		if tag := qwenInlineEmotionTag(emoCfg.Emotion); tag != "" {
+			input.Text = tag + input.Text
+		}
+	}
+	return model
+}
+
+func qwenInlineEmotionTag(value emotion.Emotion) string {
+	if tag := emotion.GetInlineTagForEmotion(value); tag != "" {
+		return tag
+	}
+	return ""
 }
 
 // TextToSpeech 非流式文本转语音：调用 HTTP 接口，下载 WAV 并解码为帧
 func (p *QwenTTSProvider) TextToSpeech(ctx context.Context, text string, sampleRate int, channels int, frameDuration int) ([][]byte, error) {
 	startTs := time.Now().UnixMilli()
 
-	// 构造请求体
+	input := qwenRequestInput{
+		Text:         text,
+		Voice:        p.Voice,
+		LanguageType: p.LanguageType,
+	}
+	var emoCfg *emotion.EmotionConfig
+	if value, ok := emotion.FromContext(ctx); ok {
+		emoCfg = &value
+	}
+	model := applyQwenExpression(p.Model, &input, p.VoicePrompt, emoCfg)
+	parameters, err := prepareQwenHTTPRequest(model, p.Format, false, &input)
+	if err != nil {
+		return nil, err
+	}
 	reqBody := qwenRequest{
-		Model: p.Model,
-		Input: qwenRequestInput{
-			Text:         text,
-			Voice:        p.Voice,
-			LanguageType: p.LanguageType,
-		},
+		Model:      model,
+		Input:      input,
+		Parameters: parameters,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -177,7 +328,11 @@ func (p *QwenTTSProvider) TextToSpeech(ctx context.Context, text string, sampleR
 	}
 
 	// 创建HTTP请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.APIURL, bytes.NewBuffer(jsonData))
+	apiURL, err := aliyuntts.ResolveHTTPAPIURL(p.APIURL, model)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -193,50 +348,39 @@ func (p *QwenTTSProvider) TextToSpeech(ctx context.Context, text string, sampleR
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API请求失败，状态码: %d, 响应: %s", resp.StatusCode, string(body))
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("读取响应失败: %v", err)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("HTTP 响应状态码错误: %d, 响应体: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var ttsResp qwenResponse
-	if err := json.Unmarshal(body, &ttsResp); err != nil {
-		return nil, fmt.Errorf("解析响应失败: %v, 响应体: %s", err, string(body))
+	if err := json.NewDecoder(resp.Body).Decode(&ttsResp); err != nil {
+		return nil, fmt.Errorf("解析响应 JSON 失败: %v", err)
 	}
 
-	if ttsResp.StatusCode != 200 {
-		return nil, fmt.Errorf("千问 TTS API 错误 [%s]: %s", ttsResp.Code, ttsResp.Message)
+	if ttsResp.StatusCode != 0 && ttsResp.StatusCode != 200 {
+		return nil, fmt.Errorf("千问 TTS 服务错误: code=%s, message=%s", ttsResp.Code, ttsResp.Message)
 	}
 
-	if ttsResp.Output.Audio.URL == "" {
-		return nil, fmt.Errorf("响应中未包含音频 URL")
+	audioURL := ttsResp.Output.Audio.URL
+	if audioURL == "" {
+		return nil, fmt.Errorf("响应中未找到音频 URL")
 	}
 
-	log.Debugf("千问 TTS 非流式，下载音频 URL: %s", ttsResp.Output.Audio.URL)
-
-	// 下载 WAV，并通过通用解码器转为帧
-	wavReq, err := http.NewRequestWithContext(ctx, http.MethodGet, ttsResp.Output.Audio.URL, nil)
+	audioReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("创建音频下载请求失败: %v", err)
 	}
 
-	wavResp, err := client.Do(wavReq)
+	audioResp, err := client.Do(audioReq)
 	if err != nil {
-		return nil, fmt.Errorf("下载音频失败: %v", err)
+		return nil, fmt.Errorf("下载音频文件失败: %v", err)
 	}
-	defer wavResp.Body.Close()
-
-	if wavResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(wavResp.Body)
-		return nil, fmt.Errorf("下载音频失败，状态码: %d, 响应: %s", wavResp.StatusCode, string(body))
-	}
+	defer audioResp.Body.Close()
 
 	outputChan := make(chan []byte, 1000)
 
-	decoder, err := util.CreateAudioDecoderWithSampleRate(ctx, wavResp.Body, outputChan, frameDuration, "wav", sampleRate)
+	decoderFormat := qwenStreamDecoderFormat(model, p.Format)
+	decoder, err := util.CreateAudioDecoderWithSampleRate(ctx, audioResp.Body, outputChan, frameDuration, decoderFormat, sampleRate)
 	if err != nil {
 		return nil, fmt.Errorf("创建千问音频解码器失败: %v", err)
 	}
@@ -262,14 +406,29 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 
 	startTs := time.Now().UnixMilli()
 
-	// 构造请求体
+	input := qwenRequestInput{
+		Text:         text,
+		Voice:        p.Voice,
+		LanguageType: p.LanguageType,
+	}
+	var emoCfg *emotion.EmotionConfig
+	if value, ok := emotion.FromContext(ctx); ok {
+		emoCfg = &value
+	}
+	model := applyQwenExpression(p.Model, &input, p.VoicePrompt, emoCfg)
+	if emoCfg != nil {
+		log.Infof("[QwenTTS] 从 Context 识别情绪: emotion=%v, voice_style=%s, instruction=%q, model=%s", emoCfg.Emotion, emoCfg.VoiceStyle, input.Instructions, model)
+	} else {
+		log.Infof("[QwenTTS] Context 未包含情绪配置, 使用默认模型: %s", model)
+	}
+	parameters, err := prepareQwenHTTPRequest(model, p.Format, true, &input)
+	if err != nil {
+		return nil, err
+	}
 	reqBody := qwenRequest{
-		Model: p.Model,
-		Input: qwenRequestInput{
-			Text:         text,
-			Voice:        p.Voice,
-			LanguageType: p.LanguageType,
-		},
+		Model:      model,
+		Input:      input,
+		Parameters: parameters,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -278,7 +437,11 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 	}
 
 	// 创建HTTP请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.APIURL, bytes.NewBuffer(jsonData))
+	apiURL, err := aliyuntts.ResolveHTTPAPIURL(p.APIURL, model)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("创建请求失败: %v", err)
 	}
@@ -315,10 +478,10 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 			return
 		}
 
-		// 管道：解析 SSE -> PCM -> 解码为帧
+		// 管道：解析 SSE -> PCM/WAV/Ogg Opus -> 解码为设备帧
 		pipeReader, pipeWriter := io.Pipe()
 
-		// 解析 SSE，写入原始 PCM 数据。
+		// 解析 SSE，写入原始音频数据。
 		// Qwen 流式返回的 audio.data 在实测中可能携带一次 WAV 头，需先剥离再按 PCM 处理。
 		go func() {
 			defer func() {
@@ -332,13 +495,15 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 			}
 		}()
 
-		// 创建音频解码器，从管道读取 PCM，输出 opus 帧
+		decoderFormat := qwenStreamDecoderFormat(model, p.Format)
+
+		// 创建音频解码器，从管道读取 PCM/Opus，输出 opus 帧
 		decoder, err := util.CreateAudioDecoderWithSampleRate(
 			ctx,
 			pipeReader,
 			outputChan,
 			frameDuration,
-			"pcm", // parseEventStream 会在需要时剥离 WAV 头，输出纯 16bit PCM
+			decoderFormat,
 			sampleRate,
 		)
 		if err != nil {
@@ -348,11 +513,13 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 			return
 		}
 
-		// 告诉解码器 PCM 的采样率/声道信息
-		decoder.WithFormat(beep.Format{
-			SampleRate:  beep.SampleRate(24000),
-			NumChannels: 1,
-		})
+		if decoderFormat == "pcm" {
+			// 告诉解码器 PCM 的采样率/声道信息
+			decoder.WithFormat(beep.Format{
+				SampleRate:  beep.SampleRate(24000),
+				NumChannels: 1,
+			})
+		}
 
 		// decoder.Run() 内部会关闭 outputChan
 		// 使用 sync.Once 确保即使 decoder.Run() 关闭了 channel，defer 也不会重复关闭
@@ -360,9 +527,6 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 			log.Errorf("千问流式音频解码失败: %v", err)
 			return
 		}
-
-		// 如果 decoder.Run() 成功完成，它会关闭 channel
-		// 所以这里需要取消 defer 的关闭操作（通过 sync.Once 已经处理了）
 
 		select {
 		case <-ctx.Done():
@@ -453,7 +617,6 @@ func (p *QwenTTSProvider) parseEventStream(ctx context.Context, reader io.Reader
 			return nil
 		}
 	}
-
 	return nil
 }
 
@@ -517,11 +680,22 @@ func qwenWAVDataOffset(data []byte) (offset int, needMore bool, err error) {
 
 // SetVoice 设置音色
 func (p *QwenTTSProvider) SetVoice(voiceConfig map[string]interface{}) error {
+	updated := false
 	if voice, ok := voiceConfig["voice"].(string); ok && voice != "" {
 		p.Voice = voice
+		updated = true
+	}
+	if voicePrompt, ok := voiceConfig["voice_prompt"].(string); ok {
+		p.VoicePrompt = voicePrompt
+		if voicePrompt != "" && p.Model == defaultQwenModel {
+			p.Model = "qwen3-tts-instruct-flash"
+		}
+		updated = true
+	}
+	if updated {
 		return nil
 	}
-	return fmt.Errorf("无效的音色配置: 缺少 voice")
+	return fmt.Errorf("无效的音色配置: 缺少 voice 或 voice_prompt")
 }
 
 // Close 关闭资源（无状态 Provider，无需关闭）
