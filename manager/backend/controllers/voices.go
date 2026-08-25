@@ -10,8 +10,8 @@ type VoiceInfo struct {
 	Languages   []string `json:"languages"`   // 支持语种
 }
 
-// ModelVoiceMap 模型家族 -> 支持的音色列表
-// 注意：这里按模型"家族"归类，例如 qwen3-tts-flash* 归为一类，qwen-tts* 归为一类。
+// ModelVoiceMap 模型或模型家族 -> 支持的音色列表
+// Qwen Audio 的 Flash/Plus 音色参数包含模型前缀，因此分别维护精确模型键。
 var ModelVoiceMap = map[string][]VoiceInfo{
 	// 通义千问3-TTS-Flash 系列（qwen3-tts-flash / qwen3-tts-flash-2025-11-27 / qwen3-tts-flash-2025-09-18）
 	"qwen3-tts-flash": {
@@ -66,29 +66,51 @@ var ModelVoiceMap = map[string][]VoiceInfo{
 		{Value: "Kiki", Label: "粤语-阿清", Description: "甜美的港妹闺蜜（女性）"},
 	},
 
-	// 通义千问-TTS 系列（qwen-tts / qwen-tts-latest / qwen-tts-2025-xx-xx）
+	// 通义千问旧版 TTS 系列（qwen-tts / qwen-tts-latest / qwen-tts-YYYY-MM-DD）。
 	"qwen-tts": {
 		{Value: "Cherry", Label: "芊悦", Description: "阳光积极、亲切自然小姐姐（女性）"},
 		{Value: "Serena", Label: "苏瑶", Description: "温柔小姐姐（女性）"},
 		{Value: "Ethan", Label: "晨煦", Description: "标准普通话，带部分北方口音，阳光、温暖、活力（男性）"},
 		{Value: "Chelsie", Label: "千雪", Description: "二次元虚拟女友（女性）"},
 		{Value: "Momo", Label: "茉兔", Description: "撒娇搞怪，逗你开心（女性）"},
-		// 其余音色根据需要可继续补充
+	},
+
+	// 阿里云百炼 CosyVoice 系列（cosyvoice-v3-flash / cosyvoice-v2 / cosyvoice-v1 / cosyvoice-3b-latest）
+	"cosyvoice": {
+		{Value: "longxiaochun", Label: "龙小春", Description: "清纯甜美女声（默认推荐）"},
+		{Value: "longwan", Label: "龙婉", Description: "温婉知性女声"},
+		{Value: "longyue", Label: "龙悦", Description: "大气从容女声"},
+		{Value: "longzhe", Label: "龙哲", Description: "沉稳磁性男声"},
+		{Value: "longsong", Label: "龙宋", Description: "成熟稳重男声"},
+		{Value: "xiaogui", Label: "小鬼", Description: "搞怪活泼童声"},
+		{Value: "cosyvoice-v2-longmiao", Label: "龙妙（v2）", Description: "灵动自然女声（CosyVoice v2）"},
 	},
 }
 
 // normalizeModel 将具体模型名归一化为模型家族键
 // 例如：qwen3-tts-flash-2025-11-27 -> qwen3-tts-flash
-//       qwen-tts-2025-05-22       -> qwen-tts
+//
+//	cosyvoice-v3-flash        -> cosyvoice
+//	qwen-audio-3.0-tts-flash  -> qwen-audio-3.0-tts-flash
 func normalizeModel(model string) string {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return ""
 	}
-	if strings.HasPrefix(model, "qwen3-tts-flash") {
+	lower := strings.ToLower(model)
+	if strings.HasPrefix(lower, "cosyvoice") {
+		return "cosyvoice"
+	}
+	if strings.HasPrefix(lower, qwenAudioFlashModel) {
+		return qwenAudioFlashModel
+	}
+	if strings.HasPrefix(lower, qwenAudioPlusModel) {
+		return qwenAudioPlusModel
+	}
+	if strings.HasPrefix(lower, "qwen3-tts") || strings.Contains(model, "Qwen3-TTS") {
 		return "qwen3-tts-flash"
 	}
-	if strings.HasPrefix(model, "qwen-tts") {
+	if strings.HasPrefix(lower, "qwen-tts") {
 		return "qwen-tts"
 	}
 	return model

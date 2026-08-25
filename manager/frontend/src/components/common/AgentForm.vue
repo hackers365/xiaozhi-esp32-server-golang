@@ -115,30 +115,53 @@
     </div>
 
     <el-form-item v-if="form.tts_config_id" label="TTS音色" prop="voice">
-      <el-select
-        v-model="form.voice"
-        placeholder="请选择或输入精确音色值"
-        style="width: 100%"
-        filterable
-        allow-create
-        default-first-option
-        reserve-keyword
-        clearable
-        :loading="loading.voices"
-        :filter-method="filterVoice"
-      >
-        <el-option
-          v-for="voice in visibleVoiceOptions"
-          :key="voice.value"
-          :label="voice.label || voice.value"
-          :value="voice.value"
+      <div style="display: flex; gap: 8px; width: 100%;">
+        <el-select
+          v-model="form.voice"
+          placeholder="请选择或输入精确音色值"
+          style="flex: 1;"
+          filterable
+          allow-create
+          default-first-option
+          reserve-keyword
+          clearable
+          :loading="loading.voices"
+          :filter-method="filterVoice"
         >
-          <div class="voice-option">
-            <span>{{ voice.label || voice.value }}</span>
-            <span>{{ voice.value }}</span>
-          </div>
-        </el-option>
-      </el-select>
+          <el-option
+            v-for="voice in visibleVoiceOptions"
+            :key="voice.value"
+            :label="voice.label || voice.value"
+            :value="voice.value"
+          >
+            <div class="voice-option">
+              <span>{{ voice.label || voice.value }}</span>
+              <span>{{ voice.value }}</span>
+            </div>
+          </el-option>
+        </el-select>
+        <VoicePreviewButton
+          v-if="supportsAliyunPreview(selectedTtsConfig?.provider)"
+          :provider="selectedTtsConfig?.provider || 'aliyun_qwen'"
+          :config-id="form.tts_config_id"
+          :voice="form.voice"
+          :instruction="form.voice_prompt"
+          :is-admin="isAdmin"
+        />
+      </div>
+    </el-form-item>
+
+    <el-form-item
+      v-if="form.tts_config_id && (selectedTtsConfig?.provider === 'aliyun_qwen' || selectedTtsConfig?.provider === 'cosyvoice' || selectedOpenAIOMNIEngine)"
+      label="音色 Prompt (合成提示词)"
+      prop="voice_prompt"
+    >
+      <el-input
+        v-model="form.voice_prompt"
+        type="textarea"
+        :rows="3"
+        placeholder="可输入文本描述想要合成出的语音风格或情感，例如：'一个温柔的前台女声，说话稍微快一点，带着活泼开朗的语气。'"
+      />
     </el-form-item>
 
     <div v-if="cloneVoices.length" class="clone-voice-row" v-loading="loading.cloneVoices">
@@ -237,6 +260,8 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import VoicePreviewButton from './VoicePreviewButton.vue'
+import { supportsAliyunPreview } from './voicePreview'
 import {
   buildAgentPayload,
   useAgentFormOptions
@@ -318,6 +343,12 @@ const suppressTtsConfigWatch = ref(false)
 
 const selectedTtsConfig = computed(() => {
   return ttsConfigs.value.find((config) => config.config_id === form.value.tts_config_id) || null
+})
+
+const selectedOpenAIOMNIEngine = computed(() => {
+  if (selectedTtsConfig.value?.provider !== 'openai') return false
+  const engine = selectedTtsConfig.value?.engine || ''
+  return engine.includes('omni')
 })
 
 const visibleVoiceOptions = computed(() => {

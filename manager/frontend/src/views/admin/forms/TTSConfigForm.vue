@@ -117,16 +117,60 @@
         </el-select>
       </el-form-item>
       <el-form-item label="模型" prop="qwen_tts.model">
-        <el-input v-model="model.qwen_tts.model" placeholder="qwen3-tts-flash" />
+        <el-select
+          v-model="model.qwen_tts.model"
+          placeholder="qwen3-tts-flash"
+          filterable
+          allow-create
+          default-first-option
+          style="width: 100%"
+        >
+          <el-option v-for="option in ALIYUN_TTS_MODEL_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
+        </el-select>
       </el-form-item>
       <el-form-item label="音色" prop="qwen_tts.voice">
-        <el-input v-model="model.qwen_tts.voice" placeholder="Cherry" />
+        <div style="display: flex; gap: 8px; width: 100%;">
+          <el-select
+            v-model="model.qwen_tts.voice"
+            placeholder="请选择音色"
+            style="flex: 1;"
+            filterable
+            allow-create
+            default-first-option
+            :loading="voiceLoading"
+          >
+            <el-option v-for="option in voiceOptionsList" :key="option.value" :label="option.label" :value="option.value" />
+          </el-select>
+          <VoicePreviewButton
+            provider="aliyun_qwen"
+            :model="model.qwen_tts.model"
+            :voice="model.qwen_tts.voice"
+            :instruction="model.qwen_tts.voice_prompt"
+            :api-key="aliyunPreviewApiKey"
+            :api-url="aliyunPreviewApiURL"
+            :region="model.qwen_tts.region"
+            :config-id="model.config_id"
+            is-admin
+          />
+        </div>
+      </el-form-item>
+      <el-form-item v-if="supportsAliyunInstruction(model.qwen_tts.model)" label="声音指令 (voice_prompt)" prop="qwen_tts.voice_prompt">
+        <el-input v-model="model.qwen_tts.voice_prompt" type="textarea" placeholder="例如：年轻女性声音，语气欢快，发音清晰" :rows="2" />
       </el-form-item>
       <el-form-item label="语种" prop="qwen_tts.language_type">
         <el-select v-model="model.qwen_tts.language_type" placeholder="请选择语种" style="width: 100%">
           <el-option label="自动" value="Auto" />
           <el-option label="中文" value="Chinese" />
           <el-option label="英文" value="English" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="音频格式" prop="qwen_tts.format">
+        <el-select v-model="model.qwen_tts.format" placeholder="请选择音频格式" style="width: 100%">
+          <el-option label="Default" value="" />
+          <el-option label="PCM" value="pcm" />
+          <el-option label="WAV" value="wav" />
+          <el-option label="MP3" value="mp3" />
+          <el-option label="ogg_opus" value="ogg_opus" />
         </el-select>
       </el-form-item>
       <el-form-item label="使用流式" prop="qwen_tts.stream">
@@ -471,6 +515,8 @@
 import { ref, computed } from 'vue'
 import { TTS_PROVIDER_OPTIONS } from './ttsProviderOptions'
 import XunfeiCommonConfig from './XunfeiCommonConfig.vue'
+import VoicePreviewButton from '@/components/common/VoicePreviewButton.vue'
+import { ALIYUN_TTS_MODEL_OPTIONS, resolveAliyunAPIURL, serializeAliyunTtsConfig, supportsAliyunInstruction } from './aliyunTtsOptions'
 
 const DOUBAO_MODEL_OPTIONS = [
   { label: '豆包语音合成 1.1', value: 'seed-tts-1.1' },
@@ -492,6 +538,10 @@ const emit = defineEmits(['request-voice-options'])
 const formRef = ref()
 // 保证音色选项始终为数组且响应式，供下拉使用
 const voiceOptionsList = computed(() => Array.isArray(props.voiceOptions) ? props.voiceOptions : [])
+const aliyunPreviewApiKey = computed(() => {
+  return String(props.model.qwen_tts?.api_key || '').trim()
+})
+const aliyunPreviewApiURL = computed(() => resolveAliyunAPIURL(props.model.qwen_tts?.api_url, props.model.qwen_tts?.region))
 const indexTTSDocURL = 'https://github.com/hackers365/xiaozhi-esp32-server-golang/blob/main/doc/indextts_vllm_api.md'
 const indexTTSReferenceURL = 'https://github.com/hackers365/index-tts-vllm/blob/master/api_server.py'
 
@@ -537,16 +587,7 @@ function getJsonData() {
       config.frame_duration = form.edge_offline?.frame_duration
       break
     case 'aliyun_qwen':
-      config.provider = 'aliyun_qwen'
-      config.api_key = form.qwen_tts?.api_key
-      config.api_url = form.qwen_tts?.api_url
-      config.region = form.qwen_tts?.region
-      config.model = form.qwen_tts?.model || 'qwen3-tts-flash'
-      config.voice = form.qwen_tts?.voice || 'Cherry'
-      config.language_type = form.qwen_tts?.language_type || 'Chinese'
-      config.stream = form.qwen_tts?.stream
-      config.frame_duration = form.qwen_tts?.frame_duration || 60
-      break
+      return JSON.stringify(serializeAliyunTtsConfig(form.qwen_tts))
     case 'openai':
       config.api_key = form.openai?.api_key
       config.api_url = form.openai?.api_url

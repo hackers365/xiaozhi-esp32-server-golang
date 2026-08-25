@@ -41,11 +41,14 @@ require (
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gorm.io/gorm v1.30.0
 	voice_server v0.0.0-00010101000000-000000000000
+	xiaozhi-esp32-server-golang/pkg/aliyuntts v0.0.0
 	xiaozhi/manager/backend v0.0.0-00010101000000-000000000000
 )
 
 // 主进程内嵌 manager HTTP 时引用 backend 子模块
 replace xiaozhi/manager/backend => ./manager/backend
+
+replace xiaozhi-esp32-server-golang/pkg/aliyuntts => ./pkg/aliyuntts
 
 // 主进程内嵌 asr_server 时引用 asr_server 子模块（Git submodule）
 replace voice_server => ./asr_server

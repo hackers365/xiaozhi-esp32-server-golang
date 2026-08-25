@@ -120,6 +120,7 @@ import { testSingleConfig, testWithData, parseJsonData } from '../../utils/confi
 import TTSConfigForm from './forms/TTSConfigForm.vue'
 import { TTS_PROVIDERS_WITH_VOICES } from './forms/ttsProviderOptions'
 import { resolveTTSProvider } from './forms/configProviderUtils'
+import { normalizeAliyunTtsConfig, reconcileAliyunVoice } from './forms/aliyunTtsOptions'
 
 const configs = ref([])
 const testingId = ref(null)
@@ -157,7 +158,9 @@ const form = reactive({
     region: 'beijing',
     model: 'qwen3-tts-flash',
     voice: 'Cherry',
+    voice_prompt: '',
     language_type: 'Chinese',
+    format: 'ogg_opus',
     stream: true,
     frame_duration: 60
   },
@@ -400,14 +403,7 @@ const editConfig = (config) => {
         form.edge_offline.frame_duration = configData.frame_duration || 20
         break
       case 'aliyun_qwen':
-        form.qwen_tts.api_key = configData.api_key || ''
-        form.qwen_tts.api_url = configData.api_url || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation'
-        form.qwen_tts.region = configData.region || 'beijing'
-        form.qwen_tts.model = configData.model || 'qwen3-tts-flash'
-        form.qwen_tts.voice = configData.voice || 'Cherry'
-        form.qwen_tts.language_type = configData.language_type || 'Chinese'
-        form.qwen_tts.stream = configData.stream !== undefined ? configData.stream : true
-        form.qwen_tts.frame_duration = configData.frame_duration || 60
+        Object.assign(form.qwen_tts, normalizeAliyunTtsConfig(configData))
         break
       case 'openai':
         form.openai.api_key = configData.api_key || ''
@@ -713,7 +709,9 @@ const resetForm = () => {
       region: 'beijing',
       model: 'qwen3-tts-flash',
       voice: 'Cherry',
+      voice_prompt: '',
       language_type: 'Chinese',
+      format: 'ogg_opus',
       stream: true,
       frame_duration: 60
     },
@@ -866,6 +864,12 @@ const loadVoiceOptions = async (provider, options = {}) => {
   voiceLoading.value = true
   try {
     const params = { provider, config_id: form.config_id || undefined }
+    if (provider === 'aliyun_qwen') {
+      const model = String(form.qwen_tts?.model || '').trim()
+      if (model) {
+        params.model = model
+      }
+    }
     if (provider === 'indextts_vllm') {
       const apiURL = String(form.indextts_vllm?.api_url || '').trim()
       const apiKey = String(form.indextts_vllm?.api_key || '').trim()
@@ -876,10 +880,15 @@ const loadVoiceOptions = async (provider, options = {}) => {
         params.api_key = apiKey
       }
     }
+    const previousOptions = voiceOptions.value
     const response = await api.get(`/user/voice-options`, {
       params
     })
-    voiceOptions.value = response.data.data || []
+    const nextOptions = response.data.data || []
+    voiceOptions.value = nextOptions
+    if (provider === 'aliyun_qwen') {
+      form.qwen_tts.voice = reconcileAliyunVoice(previousOptions, nextOptions, form.qwen_tts.voice)
+    }
   } catch (error) {
     console.error('加载音色列表失败:', error)
     voiceOptions.value = []
@@ -899,6 +908,12 @@ watch(() => form.provider, (newProvider) => {
     loadVoiceOptions(newProvider)
   }
 }, { immediate: false })
+
+watch(() => form.qwen_tts.model, (newModel) => {
+  if (showDialog.value && form.provider === 'aliyun_qwen') {
+    loadVoiceOptions('aliyun_qwen')
+  }
+})
 
 // 监听对话框打开，加载当前 provider 的音色列表（nextTick 确保弹窗已渲染后再请求）
 watch(showDialog, (isOpen) => {

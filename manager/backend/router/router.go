@@ -45,6 +45,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 	speakerGroupController := controllers.NewSpeakerGroupController(db, cfg)
 	voiceCloneController := controllers.NewVoiceCloneController(db, cfg)
 	poolStatsController := controllers.NewPoolStatsController()
+	ttsPreviewController := controllers.NewTTSPreviewController(db)
 
 	// 初始化聊天历史控制器（使用传入的 cfg，不重新 Load 避免内嵌时读错路径）
 	audioBasePath := "./storage/chat_history/audio"
@@ -183,6 +184,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				// 配置列表
 				user.GET("/llm-configs", userController.GetLLMConfigs)
 				user.GET("/tts-configs", userController.GetTTSConfigs)
+				user.POST("/tts/preview", ttsPreviewController.PreviewUserTTS)
 
 				// MCP接入点
 				user.GET("/mcp-services/options", userController.GetMCPServiceOptions)
@@ -397,6 +399,8 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.GET("/users/:id/voice-clones", adminController.GetUserVoiceClonesAdmin)
 				admin.GET("/users/:id/voice-clone-quotas", adminController.GetUserVoiceCloneQuotas)
 				admin.PUT("/users/:id/voice-clone-quotas", adminController.UpdateUserVoiceCloneQuotas)
+
+				admin.POST("/tts/preview", ttsPreviewController.PreviewAdminTTS)
 
 				// 配置导入导出
 				admin.GET("/configs/export", adminController.ExportConfigs)

@@ -393,8 +393,8 @@ func GetAliyunQwenVoicesByModel(model string) []VoiceOption {
 	// 使用本地函数获取模型对应的音色列表
 	voices := GetVoicesByModel(model)
 	if voices == nil || len(voices) == 0 {
-		// 如果找不到对应模型的音色，返回基础列表
-		return GetVoiceOptionsByProvider("aliyun_qwen")
+		// 自定义或未知模型没有可靠的系统音色表，由前端保留手工输入能力。
+		return []VoiceOption{}
 	}
 
 	// 将 VoiceInfo 转换为 VoiceOption

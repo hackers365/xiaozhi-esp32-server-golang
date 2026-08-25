@@ -166,6 +166,8 @@ import LLMConfigForm from './forms/LLMConfigForm.vue'
 import TTSConfigForm from './forms/TTSConfigForm.vue'
 import { resolveASRProvider, resolveTTSProvider, resolveVADProvider } from './forms/configProviderUtils'
 import { getProviderFixedType, resolveLLMProvider } from './forms/llmCatalog'
+import { TTS_PROVIDERS_WITH_VOICES } from './forms/ttsProviderOptions'
+import { normalizeAliyunTtsConfig, reconcileAliyunVoice } from './forms/aliyunTtsOptions'
 
 const currentStep = ref(0)
 const saving = ref(false)
@@ -992,7 +994,7 @@ async function loadTtsIfExists() {
       }
     } else if (p === 'edge') Object.assign(ttsForm.edge, data)
     else if (p === 'edge_offline') Object.assign(ttsForm.edge_offline, data)
-    else if (p === 'aliyun_qwen') Object.assign(ttsForm.qwen_tts, data)
+    else if (p === 'aliyun_qwen') Object.assign(ttsForm.qwen_tts, normalizeAliyunTtsConfig(data))
     else if (p === 'openai') Object.assign(ttsForm.openai, data)
     else if (p === 'xunfei') Object.assign(ttsForm.xunfei, data)
     else if (p === 'xunfei_super_tts') Object.assign(ttsForm.xunfei_super_tts, data)
@@ -1284,15 +1286,26 @@ async function loadTtsVoiceOptions(provider) {
     voiceOptions.value = []
     return
   }
-  const providersWithVoices = ['minimax', 'edge', 'doubao', 'doubao_ws', 'zhipu', 'openai', 'xunfei_super_tts']
-  if (!providersWithVoices.includes(provider)) {
+  if (!TTS_PROVIDERS_WITH_VOICES.includes(provider)) {
     voiceOptions.value = []
     return
   }
   voiceLoading.value = true
   try {
-    const response = await api.get('/user/voice-options', { params: { provider } })
-    voiceOptions.value = response.data.data || []
+    const params = { provider }
+    if (provider === 'aliyun_qwen') {
+      const model = String(ttsForm.qwen_tts?.model || '').trim()
+      if (model) {
+        params.model = model
+      }
+    }
+    const previousOptions = voiceOptions.value
+    const response = await api.get('/user/voice-options', { params })
+    const nextOptions = response.data.data || []
+    voiceOptions.value = nextOptions
+    if (provider === 'aliyun_qwen') {
+      ttsForm.qwen_tts.voice = reconcileAliyunVoice(previousOptions, nextOptions, ttsForm.qwen_tts.voice)
+    }
   } catch (error) {
     console.error('加载音色列表失败:', error)
     voiceOptions.value = []
@@ -1318,6 +1331,12 @@ watch(() => ttsForm.provider, (provider) => {
     loadTtsVoiceOptions(provider)
   }
 }, { immediate: false })
+
+watch(() => ttsForm.qwen_tts.model, (newModel) => {
+  if (currentStep.value === 4 && ttsForm.provider === 'aliyun_qwen') {
+    loadTtsVoiceOptions('aliyun_qwen')
+  }
+})
 
 const authStore = useAuthStore()
 
