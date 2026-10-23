@@ -493,6 +493,10 @@ func (a *AliyunQwen3ASR) StreamingRecognize(ctx context.Context, audioStream <-c
 			if !waitForResult {
 				return
 			}
+			// Lazy connect: with no audio the websocket was never opened.
+			if conn == nil || audioChunkCount == 0 {
+				return
+			}
 
 			// Send session.finish.
 			finishEvent := NewSessionFinishEvent()
