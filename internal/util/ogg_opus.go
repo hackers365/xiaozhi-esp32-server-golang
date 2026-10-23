@@ -79,8 +79,8 @@ func WrapOggOpusPackets(packets [][]byte, sampleRate int, channels int, frameSiz
 	var out bytes.Buffer
 	const serial = uint32(0x58495a48)
 
-	_, _ = out.Write(buildOggPage(serial, 0, 0x02, 0, buildOpusHeadPacket(sampleRate, channels)))
-	_, _ = out.Write(buildOggPage(serial, 1, 0x00, 0, buildOpusTagsPacket()))
+	_, _ = out.Write(BuildOggPage(serial, 0, 0x02, 0, BuildOpusHeadPacket(sampleRate, channels)))
+	_, _ = out.Write(BuildOggPage(serial, 1, 0x00, 0, BuildOpusTagsPacket()))
 
 	var granulePosition uint64
 	for i, packet := range packets {
@@ -89,13 +89,13 @@ func WrapOggOpusPackets(packets [][]byte, sampleRate int, channels int, frameSiz
 		if i == len(packets)-1 {
 			headerType = 0x04
 		}
-		_, _ = out.Write(buildOggPage(serial, uint32(i+2), headerType, granulePosition, packet))
+		_, _ = out.Write(BuildOggPage(serial, uint32(i+2), headerType, granulePosition, packet))
 	}
 
 	return out.Bytes()
 }
 
-func buildOpusHeadPacket(sampleRate int, channels int) []byte {
+func BuildOpusHeadPacket(sampleRate int, channels int) []byte {
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("OpusHead")
 	_ = buf.WriteByte(1)
@@ -107,8 +107,8 @@ func buildOpusHeadPacket(sampleRate int, channels int) []byte {
 	return buf.Bytes()
 }
 
-func buildOpusTagsPacket() []byte {
-	vendor := []byte("xiaozhi-mock-ai-server")
+func BuildOpusTagsPacket() []byte {
+	vendor := []byte("xiaozhi-server-golang")
 	var buf bytes.Buffer
 	_, _ = buf.WriteString("OpusTags")
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(len(vendor)))
@@ -117,8 +117,8 @@ func buildOpusTagsPacket() []byte {
 	return buf.Bytes()
 }
 
-func buildOggPage(serial uint32, sequence uint32, headerType byte, granulePosition uint64, packet []byte) []byte {
-	segments := buildOggSegments(len(packet))
+func BuildOggPage(serial uint32, sequence uint32, headerType byte, granulePosition uint64, packet []byte) []byte {
+	segments := BuildOggSegments(len(packet))
 	pageSize := 27 + len(segments) + len(packet)
 	page := make([]byte, pageSize)
 
@@ -137,7 +137,7 @@ func buildOggPage(serial uint32, sequence uint32, headerType byte, granulePositi
 	return page
 }
 
-func buildOggSegments(packetLen int) []byte {
+func BuildOggSegments(packetLen int) []byte {
 	if packetLen <= 0 {
 		return []byte{0}
 	}
