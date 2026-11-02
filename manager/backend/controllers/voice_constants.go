@@ -12,6 +12,18 @@ type VoiceOption struct {
 // 根据火山引擎豆包语音文档：https://www.volcengine.com/docs/6561/97465?lang=zh
 // 和豆包WebSocket文档：https://www.volcengine.com/docs/6561/1257544?lang=zh
 var VoiceOptions = map[string][]VoiceOption{
+	// MiMo 内置音色，与 TTS 配置表单候选保持一致。
+	"mimo": {
+		{Value: "mimo_default", Label: "默认（mimo_default）"},
+		{Value: "冰糖", Label: "冰糖（温柔女声）"},
+		{Value: "茉莉", Label: "茉莉"},
+		{Value: "苏打", Label: "苏打"},
+		{Value: "白桦", Label: "白桦"},
+		{Value: "Mia", Label: "Mia（英文女声）"},
+		{Value: "Chloe", Label: "Chloe（英文女声）"},
+		{Value: "Milo", Label: "Milo（英文男声）"},
+		{Value: "Dean", Label: "Dean（英文男声）"},
+	},
 	// Edge TTS 音色列表（中文）
 	// 参考：https://blog.csdn.net/u012917925/article/details/134683773
 	"edge": {

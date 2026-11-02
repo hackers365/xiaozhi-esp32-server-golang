@@ -12,6 +12,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,13 +35,23 @@ func NewClient(key, apiURL string) (*Client, error) {
 	key = strings.TrimSpace(key)
 	if key == "" { key = os.Getenv("MIMO_API_KEY") }
 	if key == "" { return nil, errors.New("MiMo API key is required") }
-	apiURL = strings.TrimRight(strings.TrimSpace(apiURL), "/")
+	apiURL = strings.TrimSpace(apiURL)
 	if apiURL == "" { apiURL = DefaultURL }
-	if strings.HasSuffix(apiURL, "/v1") { apiURL += "/chat/completions" }
-	if !strings.HasPrefix(apiURL, "https://") && !strings.HasPrefix(apiURL, "http://127.0.0.1:") && !strings.HasPrefix(apiURL, "http://localhost:") {
-		return nil, fmt.Errorf("MiMo API URL must use HTTPS: %q", apiURL)
+	endpoint, err := url.Parse(apiURL)
+	if err != nil || endpoint.Hostname() == "" || (endpoint.Scheme != "https" && endpoint.Scheme != "http") {
+		return nil, errors.New("MiMo API 地址必须是包含有效主机名的 HTTP 或 HTTPS URL")
 	}
-	return &Client{Key:key, URL:apiURL, HTTP:&http.Client{Timeout:90*time.Second}}, nil
+	path := strings.TrimRight(endpoint.Path, "/")
+	endpoint.Path = path
+	endpoint.RawPath = strings.TrimRight(endpoint.RawPath, "/")
+	if !strings.HasSuffix(path, "/chat/completions") {
+		if strings.HasSuffix(path, "/v1") {
+			endpoint = endpoint.JoinPath("chat/completions")
+		} else {
+			endpoint = endpoint.JoinPath("v1/chat/completions")
+		}
+	}
+	return &Client{Key:key, URL:endpoint.String(), HTTP:&http.Client{Timeout:90*time.Second}}, nil
 }
 
 func (c *Client) request(ctx context.Context, body any) (*http.Response, error) {

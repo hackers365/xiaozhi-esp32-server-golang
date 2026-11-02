@@ -6,6 +6,8 @@
 
 在管理后台的 **ASR 配置**和 **TTS 配置**中分别选择「小米 MiMo」。两者都需要 API Key：可填入表单，也可在**运行 Go 主服务的环境**中设置 `MIMO_API_KEY`。默认 API 地址为 `https://api.xiaomimimo.com/v1/chat/completions`。不要把 Key 提交到仓库或贴到 PR 中。
 
+API 地址支持填写根域名、以 `/v1` 结尾的基础地址，或完整的 `/chat/completions` 地址；客户端会自动补全接口路径，并保留反向代理的路径前缀和查询参数。支持 HTTP 和 HTTPS，例如 Docker Mock 地址 `http://mock-ai:18080` 会补全为 `http://mock-ai:18080/v1/chat/completions`。智能体配置中的 MiMo 音色候选通过现有音色接口提供。
+
 | 功能 | 模型和用法 |
 | --- | --- |
 | 语音识别 | `mimo-v2.5-asr`；支持 `auto`、`zh`、`en`。服务端收齐一段由 VAD 划分的语音后，以 16 kHz WAV 上传；不支持边说边上传的实时输入。 |
