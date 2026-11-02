@@ -153,6 +153,14 @@ const form = reactive({
     audio_format: 'mp3',
     instruct_text: '你好'
   },
+  mimo: {
+    api_key: '',
+    api_url: 'https://api.xiaomimimo.com/v1/chat/completions',
+    model: 'mimo-v2.5-tts',
+    voice: 'mimo_default',
+    voice_prompt: '',
+    reference_audio_path: ''
+  },
   qwen_tts: {
     api_key: '',
     api_url: 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation',
@@ -399,6 +407,16 @@ const editConfig = (config) => {
         form.edge_offline.sample_rate = configData.sample_rate || 16000
         form.edge_offline.channels = configData.channels || 1
         form.edge_offline.frame_duration = configData.frame_duration || 20
+        break
+      case 'mimo':
+        Object.assign(form.mimo, {
+          api_key: configData.api_key || '',
+          api_url: configData.api_url || 'https://api.xiaomimimo.com/v1/chat/completions',
+          model: configData.model || 'mimo-v2.5-tts',
+          voice: configData.voice || 'mimo_default',
+          voice_prompt: configData.voice_prompt || '',
+          reference_audio_path: configData.reference_audio_path || ''
+        })
         break
       case 'aliyun_qwen':
         Object.assign(form.qwen_tts, normalizeAliyunTtsConfig(configData))
@@ -700,6 +718,14 @@ const resetForm = () => {
       target_sr: 24000,
       audio_format: 'mp3',
       instruct_text: '你好'
+    },
+    mimo: {
+      api_key: '',
+      api_url: 'https://api.xiaomimimo.com/v1/chat/completions',
+      model: 'mimo-v2.5-tts',
+      voice: 'mimo_default',
+      voice_prompt: '',
+      reference_audio_path: ''
     },
     qwen_tts: {
       api_key: '',

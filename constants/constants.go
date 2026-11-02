@@ -11,6 +11,7 @@ const (
 	AsrTypeDoubao       = "doubao"
 	AsrTypeAliyunFunASR = "aliyun_funasr"
 	AsrTypeAliyunQwen3  = "aliyun_qwen3"
+	AsrTypeMiMo         = "mimo"
 	AsrTypeXunfei       = "xunfei"
 )
 
@@ -36,5 +37,6 @@ const (
 	TtsTypeZhipu        = "zhipu"
 	TtsTypeMinimax      = "minimax"
 	TtsTypeAliyunQwen   = "aliyun_qwen"
+	TtsTypeMiMo         = "mimo"
 	TtsTypeIndexTTSVLLM = "indextts_vllm"
 )

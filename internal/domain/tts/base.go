@@ -12,6 +12,7 @@ import (
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/edge_offline"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/minimax"
+	"xiaozhi-esp32-server-golang/internal/domain/tts/mimo"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/openai"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/qwen"
 	"xiaozhi-esp32-server-golang/internal/domain/tts/streaming"
@@ -84,6 +85,12 @@ func GetTTSProvider(providerName string, config map[string]interface{}) (TTSProv
 		baseProvider = minimax.NewMinimaxTTSProvider(config)
 	case constants.TtsTypeAliyunQwen:
 		baseProvider = qwen.NewQwenTTSProvider(config)
+	case constants.TtsTypeMiMo:
+		provider := mimo.NewProvider(config)
+		if provider == nil {
+			return nil, fmt.Errorf("MiMo TTS 初始化失败，请检查 API Key 和 API URL")
+		}
+		baseProvider = provider
 	case constants.TtsTypeIndexTTSVLLM:
 		baseProvider = openai.NewOpenAITTSProvider(buildIndexTTSOpenAIConfig(config))
 	default:

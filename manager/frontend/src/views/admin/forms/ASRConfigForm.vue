@@ -6,6 +6,7 @@
         <el-option label="Aliyun FunASR" value="aliyun_funasr" />
         <el-option label="豆包" value="doubao" />
         <el-option label="Aliyun Qwen3" value="aliyun_qwen3" />
+        <el-option label="小米 MiMo" value="mimo" />
         <el-option label="讯飞" value="xunfei" />
       </el-select>
     </el-form-item>
@@ -15,6 +16,24 @@
     <el-form-item label="配置ID" prop="config_id">
       <el-input v-model="model.config_id" placeholder="请输入唯一的配置ID" />
     </el-form-item>
+    <div v-if="model.provider === 'mimo'">
+      <el-form-item label="API Key" prop="mimo.api_key">
+        <el-input v-model="model.mimo.api_key" type="password" show-password placeholder="留空使用 MIMO_API_KEY" />
+      </el-form-item>
+      <el-form-item label="API URL" prop="mimo.api_url">
+        <el-input v-model="model.mimo.api_url" />
+      </el-form-item>
+      <el-form-item label="识别语言" prop="mimo.language">
+        <el-select v-model="model.mimo.language">
+          <el-option label="自动识别" value="auto" />
+          <el-option label="中文" value="zh" />
+          <el-option label="英文" value="en" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="请求超时（秒）" prop="mimo.timeout">
+        <el-input-number v-model="model.mimo.timeout" :min="1" :max="180" />
+      </el-form-item>
+    </div>
     <div v-if="model.provider === 'funasr'">
       <el-form-item label="主机地址" prop="funasr.host">
         <el-input v-model="model.funasr.host" placeholder="请输入主机地址" />
@@ -314,6 +333,18 @@ const ASR_PROVIDER_DEFAULTS = {
       timeout: 30
     }
   },
+  mimo: {
+    name: '小米 MiMo ASR',
+    config_id: 'mimo_asr_default',
+    data: {
+      api_key: '',
+      api_url: 'https://api.xiaomimimo.com/v1/chat/completions',
+      model: 'mimo-v2.5-asr',
+      sample_rate: 16000,
+      language: 'auto',
+      timeout: 60
+    }
+  },
   xunfei: {
     name: '讯飞 ASR',
     config_id: 'xunfei_default',
@@ -397,6 +428,7 @@ function getJsonData() {
   if (m.provider === 'aliyun_funasr') return JSON.stringify(m.aliyun_funasr || {})
   if (m.provider === 'doubao') return JSON.stringify(m.doubao || {})
   if (m.provider === 'aliyun_qwen3') return JSON.stringify(m.aliyun_qwen3 || {})
+  if (m.provider === 'mimo') return JSON.stringify(m.mimo || {})
   if (m.provider === 'xunfei') return JSON.stringify(m.xunfei || {})
   return '{}'
 }

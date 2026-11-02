@@ -488,6 +488,32 @@
       </el-form-item>
     </template>
 
+    <template v-if="model.provider === 'mimo'">
+      <el-form-item label="API Key" prop="mimo.api_key">
+        <el-input v-model="model.mimo.api_key" type="password" show-password placeholder="留空使用 MIMO_API_KEY" />
+      </el-form-item>
+      <el-form-item label="API URL" prop="mimo.api_url">
+        <el-input v-model="model.mimo.api_url" />
+      </el-form-item>
+      <el-form-item label="模型" prop="mimo.model">
+        <el-select v-model="model.mimo.model">
+          <el-option label="MiMo TTS（实时）" value="mimo-v2.5-tts" />
+          <el-option label="MiMo VoiceDesign" value="mimo-v2.5-tts-voicedesign" />
+          <el-option label="MiMo VoiceClone" value="mimo-v2.5-tts-voiceclone" />
+        </el-select>
+      </el-form-item>
+      <el-form-item v-if="model.mimo.model === 'mimo-v2.5-tts'" label="音色" prop="mimo.voice">
+        <el-select v-model="model.mimo.voice" filterable allow-create default-first-option>
+          <el-option v-for="voice in ['mimo_default', '冰糖', '茉莉', '苏打', '白桦', 'Mia', 'Chloe', 'Milo', 'Dean']" :key="voice" :label="voice" :value="voice" />
+        </el-select>
+      </el-form-item>
+      <el-form-item label="音色描述 / 风格指令" prop="mimo.voice_prompt">
+        <el-input v-model="model.mimo.voice_prompt" type="textarea" :rows="2" placeholder="VoiceDesign 模型必填；普通 TTS 可选" />
+      </el-form-item>
+      <el-form-item v-if="model.mimo.model === 'mimo-v2.5-tts-voiceclone'" label="参考音频路径" prop="mimo.reference_audio_path">
+        <el-input v-model="model.mimo.reference_audio_path" placeholder="服务器可读的 .wav 或 .mp3 文件路径" />
+      </el-form-item>
+    </template>
     <template v-if="model.provider === 'cosyvoice'">
       <el-form-item label="API URL" prop="cosyvoice.api_url">
         <el-input v-model="model.cosyvoice.api_url" placeholder="请输入API URL" />
@@ -559,6 +585,14 @@ function getJsonData() {
   const form = props.model
   const config = {}
   switch (form.provider) {
+    case 'mimo':
+      config.api_key = form.mimo?.api_key
+      config.api_url = form.mimo?.api_url
+      config.model = form.mimo?.model || 'mimo-v2.5-tts'
+      config.voice = form.mimo?.voice || 'mimo_default'
+      config.voice_prompt = form.mimo?.voice_prompt || ''
+      config.reference_audio_path = form.mimo?.reference_audio_path || ''
+      break
     case 'cosyvoice':
       config.api_url = form.cosyvoice?.api_url
       config.spk_id = form.cosyvoice?.spk_id

@@ -9,7 +9,7 @@ var knownProviders = map[string]map[string]struct{}{
 		"ten_vad": {}, "webrtc_vad": {}, "silero_vad": {},
 	},
 	"asr": {
-		"funasr": {}, "aliyun_funasr": {}, "doubao": {}, "aliyun_qwen3": {}, "xunfei": {},
+		"funasr": {}, "aliyun_funasr": {}, "doubao": {}, "aliyun_qwen3": {}, "mimo": {}, "xunfei": {},
 	},
 	"llm": {
 		"openai": {}, "ollama": {}, "azure": {}, "anthropic": {}, "zhipu": {}, "aliyun": {},
@@ -18,7 +18,7 @@ var knownProviders = map[string]map[string]struct{}{
 	"tts": {
 		"doubao": {}, "doubao_ws": {}, "cosyvoice": {}, "edge": {}, "edge_offline": {},
 		"xiaozhi": {}, "xunfei": {}, "xunfei_super_tts": {}, "openai": {}, "zhipu": {},
-		"minimax": {}, "aliyun_qwen": {}, "indextts_vllm": {},
+		"minimax": {}, "aliyun_qwen": {}, "indextts_vllm": {}, "mimo": {},
 	},
 	"memory": {
 		"nomemo": {}, "memobase": {}, "mem0": {}, "memos": {},
@@ -216,6 +216,9 @@ func inferASRProvider(data map[string]interface{}) string {
 	}
 	model := stringFromMap(data, "model")
 	wsURL := stringFromMap(data, "ws_url")
+	if containsAny(model, "mimo-v2.5-asr") || containsAny(stringFromMap(data, "api_url"), "xiaomimimo.com") {
+		return "mimo"
+	}
 	if containsAny(model, "qwen3-asr") || containsAny(wsURL, "/realtime") {
 		return "aliyun_qwen3"
 	}
@@ -272,6 +275,8 @@ func inferTTSProvider(data map[string]interface{}) string {
 	apiURL := stringFromMap(data, "api_url", "server_url", "ws_url")
 	model := normalizeToken(stringFromMap(data, "model"))
 	switch {
+	case containsAny(model, "mimo-v2.5-tts") || containsAny(apiURL, "xiaomimimo.com"):
+		return "mimo"
 	case hasAny(data, "spk_id", "instruct_text"):
 		return "cosyvoice"
 	case hasAny(data, "server_url"):

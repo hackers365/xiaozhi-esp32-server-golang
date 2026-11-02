@@ -192,6 +192,14 @@ const form = reactive({
     vad_silence_ms: 400,
     timeout: 30
   },
+  mimo: {
+    api_key: '',
+    api_url: 'https://api.xiaomimimo.com/v1/chat/completions',
+    model: 'mimo-v2.5-asr',
+    sample_rate: 16000,
+    language: 'auto',
+    timeout: 60
+  },
   xunfei: {
     appid: '',
     api_key: '',
@@ -263,6 +271,9 @@ const rules = computed(() => {
       'aliyun_qwen3.language': [{ required: true, message: '请输入语言', trigger: 'blur' }],
       'aliyun_qwen3.timeout': [{ required: true, message: '请输入超时时间', trigger: 'blur' }]
     }
+  }
+  if (form.provider === 'mimo') {
+    return { ...base, 'mimo.language': [{ required: true, message: '请选择语言', trigger: 'change' }] }
   }
   if (form.provider === 'xunfei') {
     return {
@@ -351,6 +362,8 @@ const editConfig = (config) => {
     } else if (config.provider === 'aliyun_qwen3' && (configObj.ws_url || configObj.model || configObj.api_key)) {
       // 新格式：直接包含配置内容
       form.aliyun_qwen3 = { ...form.aliyun_qwen3, ...configObj }
+    } else if (config.provider === 'mimo') {
+      form.mimo = { ...form.mimo, ...(configObj.mimo || configObj) }
     } else if (configObj.xunfei) {
       form.xunfei = { ...form.xunfei, ...configObj.xunfei }
     } else if (config.provider === 'xunfei' && (configObj.appid || configObj.api_key || configObj.api_secret)) {

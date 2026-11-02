@@ -1,6 +1,6 @@
 const providers = {
   vad: new Set(['ten_vad', 'webrtc_vad', 'silero_vad']),
-  asr: new Set(['funasr', 'aliyun_funasr', 'doubao', 'aliyun_qwen3', 'xunfei']),
+  asr: new Set(['funasr', 'aliyun_funasr', 'doubao', 'aliyun_qwen3', 'mimo', 'xunfei']),
   tts: new Set([
     'doubao',
     'doubao_ws',
@@ -14,7 +14,8 @@ const providers = {
     'zhipu',
     'minimax',
     'aliyun_qwen',
-    'indextts_vllm'
+    'indextts_vllm',
+    'mimo'
   ]),
   memory: new Set(['nomemo', 'memobase', 'mem0', 'memos']),
   vision: new Set(['aliyun_vision', 'doubao_vision'])
@@ -63,6 +64,7 @@ export function resolveASRProvider(provider, configId, data = {}) {
   return resolve('asr', provider, configId, data, (value) => {
     const model = stringValue(value, 'model')
     const wsUrl = stringValue(value, 'ws_url')
+    if (includes(model, 'mimo-v2.5-asr') || includes(stringValue(value, 'api_url'), 'xiaomimimo.com')) return 'mimo'
     if (has(value, 'appid', 'api_secret')) return 'xunfei'
     if (includes(model, 'qwen3-asr') || includes(wsUrl, '/realtime')) return 'aliyun_qwen3'
     if (includes(model, 'fun-asr') || includes(wsUrl, '/inference')) return 'aliyun_funasr'
@@ -76,6 +78,7 @@ export function resolveTTSProvider(provider, configId, data = {}) {
   return resolve('tts', provider, configId, data, (value) => {
     const url = stringValue(value, 'api_url', 'server_url', 'ws_url')
     const model = stringValue(value, 'model')
+    if (includes(model, 'mimo-v2.5-tts') || includes(url, 'xiaomimimo.com')) return 'mimo'
     if (has(value, 'spk_id', 'instruct_text')) return 'cosyvoice'
     if (has(value, 'server_url')) return 'edge_offline'
     if (has(value, 'rate', 'pitch') && has(value, 'voice')) return 'edge'
