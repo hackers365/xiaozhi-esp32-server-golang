@@ -43,6 +43,7 @@ const (
 	ServerMessageTypeText         = "text"          // 文本消息
 	ServerMessageTypeGoodBye      = "goodbye"       // 再见消息
 	ServerMessageTypeSpeakRequest = "speak_request" // 主动播报请求
+	ServerMessageTypeNotify       = "notify"        // 异步单向语音通知
 )
 
 // 消息状态常量
@@ -70,6 +71,19 @@ type MqttLifecycleEvent struct {
 	State    string `json:"state"`
 	ClientID string `json:"client_id,omitempty"`
 	Ts       int64  `json:"ts"`
+}
+
+// NotifySubtitle 表示通知字幕
+type NotifySubtitle struct {
+	StartMs uint32 `json:"start_ms"`
+	Text    string `json:"text"`
+}
+
+// ServerNotifyMessage 表示符合 PR #2191 规范的异步通知消息
+type ServerNotifyMessage struct {
+	Type      string           `json:"type"`
+	AudioURL  string           `json:"audio_url"`
+	Subtitles []NotifySubtitle `json:"subtitles,omitempty"`
 }
 
 // ServerMessage 表示服务器消息

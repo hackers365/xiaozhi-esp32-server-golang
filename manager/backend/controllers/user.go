@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type UserController struct {
 		CallOpenClawChatFromClient(ctx context.Context, body map[string]interface{}) (map[string]interface{}, error)
 		CallOpenClawChatStreamFromClient(ctx context.Context, body map[string]interface{}, onResponse func(*WebSocketResponse) error) (map[string]interface{}, error)
 		InjectMessageToDevice(ctx context.Context, deviceID, message string, skipLlm bool, autoListen bool) error
+		InjectMessageParamsToDevice(ctx context.Context, params map[string]interface{}) error
 	}
 }
 
@@ -88,15 +90,46 @@ func (uc *UserController) InjectMessage(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 
 	var req struct {
-		DeviceID   string `json:"device_id" binding:"required"`
-		Message    string `json:"message" binding:"required"`
-		SkipLlm    bool   `json:"skip_llm"`
-		AutoListen *bool  `json:"auto_listen"`
+		DeviceID    string      `json:"device_id" binding:"required"`
+		Message     string      `json:"message"`
+		Mode        string      `json:"mode"` // "notify" (单向异步通知) 或 "speak" (默认双向对话)
+		SkipLlm     bool        `json:"skip_llm"`
+		AutoListen  *bool       `json:"auto_listen"`
+		Voice       string      `json:"voice"`
+		TTSConfigID string      `json:"tts_config_id"`
+		Speed       float64     `json:"speed"`
+		AudioURL    string      `json:"audio_url"`
+		Subtitles   interface{} `json:"subtitles"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
 		return
+	}
+
+	req.DeviceID = strings.TrimSpace(req.DeviceID)
+	req.Message = strings.TrimSpace(req.Message)
+	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))
+	req.Voice = strings.TrimSpace(req.Voice)
+	req.TTSConfigID = strings.TrimSpace(req.TTSConfigID)
+	req.AudioURL = strings.TrimSpace(req.AudioURL)
+
+	if req.Mode == "notify" {
+		if req.Message == "" && req.AudioURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: notify 模式下 message 与 audio_url 不能同时为空"})
+			return
+		}
+	} else if req.Message == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: message 不能为空"})
+		return
+	}
+
+	if req.AudioURL != "" {
+		parsedURL, err := url.Parse(req.AudioURL)
+		if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: audio_url 必须为合法的 http/https 地址"})
+			return
+		}
 	}
 
 	// 验证设备是否属于当前用户
@@ -113,23 +146,55 @@ func (uc *UserController) InjectMessage(c *gin.Context) {
 		autoListen = *req.AutoListen
 	}
 
+	params := map[string]interface{}{
+		"device_id":   device.DeviceName,
+		"message":     req.Message,
+		"mode":        req.Mode,
+		"skip_llm":    req.SkipLlm,
+		"auto_listen": autoListen,
+	}
+	if req.Voice != "" {
+		params["voice"] = req.Voice
+	}
+	if req.TTSConfigID != "" {
+		params["tts_config_id"] = req.TTSConfigID
+	}
+	if req.Speed > 0 {
+		params["speed"] = req.Speed
+	}
+	if req.AudioURL != "" {
+		params["audio_url"] = req.AudioURL
+	}
+	if req.Subtitles != nil {
+		params["subtitles"] = req.Subtitles
+	}
+
 	// 通过WebSocket发送语音推送请求到主服务器
 	ctx := context.Background()
-	err := uc.WebSocketController.InjectMessageToDevice(ctx, device.DeviceName, req.Message, req.SkipLlm, autoListen)
+	err := uc.WebSocketController.InjectMessageParamsToDevice(ctx, params)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "语音推送失败: " + err.Error()})
 		return
 	}
 
+	responseData := gin.H{
+		"device_id":   req.DeviceID,
+		"message":     req.Message,
+		"mode":        req.Mode,
+		"skip_llm":    req.SkipLlm,
+		"auto_listen": autoListen,
+	}
+	if req.Voice != "" {
+		responseData["voice"] = req.Voice
+	}
+	if req.AudioURL != "" {
+		responseData["audio_url"] = req.AudioURL
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "语音推送请求已发送",
-		"data": gin.H{
-			"device_id":   req.DeviceID,
-			"message":     req.Message,
-			"skip_llm":    req.SkipLlm,
-			"auto_listen": autoListen,
-		},
+		"data":    responseData,
 	})
 }
 

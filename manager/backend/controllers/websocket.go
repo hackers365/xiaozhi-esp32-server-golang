@@ -1173,21 +1173,14 @@ func (ctrl *WebSocketController) RequestPingFromClient(ctx context.Context, uuid
 	return ctrl.SendRequestToClient(ctx, uuid, "GET", "/api/server/ping", nil)
 }
 
-// InjectMessageToDevice 向设备注入消息（广播方式）
-func (ctrl *WebSocketController) InjectMessageToDevice(ctx context.Context, deviceID, message string, skipLlm bool, autoListen bool) error {
-	body := map[string]interface{}{
-		"device_id":   deviceID,
-		"message":     message,
-		"skip_llm":    skipLlm,
-		"auto_listen": autoListen,
-	}
-
+// InjectMessageParamsToDevice 向设备注入消息（支持自定义参数与mode）
+func (ctrl *WebSocketController) InjectMessageParamsToDevice(ctx context.Context, params map[string]interface{}) error {
 	// 创建请求
 	request := WebSocketRequest{
 		ID:     uuid.New().String(),
 		Method: "POST",
 		Path:   "/api/device/inject_msg",
-		Body:   body,
+		Body:   params,
 	}
 
 	// 广播给所有连接的客户端
@@ -1212,6 +1205,17 @@ func (ctrl *WebSocketController) InjectMessageToDevice(ctx context.Context, devi
 	}
 
 	return lastError
+}
+
+// InjectMessageToDevice 向设备注入消息（广播方式）
+func (ctrl *WebSocketController) InjectMessageToDevice(ctx context.Context, deviceID, message string, skipLlm bool, autoListen bool) error {
+	body := map[string]interface{}{
+		"device_id":   deviceID,
+		"message":     message,
+		"skip_llm":    skipLlm,
+		"auto_listen": autoListen,
+	}
+	return ctrl.InjectMessageParamsToDevice(ctx, body)
 }
 
 // 异步发送请求到客户端（不等待响应）

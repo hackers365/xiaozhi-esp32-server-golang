@@ -123,6 +123,19 @@ func (s *ServerTransport) SendSpeakRequest(text string, autoListen bool) error {
 	return s.transport.SendCmd(bytes)
 }
 
+func (s *ServerTransport) SendNotify(audioURL string, subtitles []NotifySubtitle) error {
+	notifyMsg := ServerNotifyMessage{
+		Type:      ServerMessageTypeNotify,
+		AudioURL:  audioURL,
+		Subtitles: subtitles,
+	}
+	bytes, err := json.Marshal(notifyMsg)
+	if err != nil {
+		return err
+	}
+	return s.transport.SendCmd(bytes)
+}
+
 func (s *ServerTransport) SendMqttGoodbye() error {
 	msg := ServerMessage{
 		Type:      ServerMessageTypeGoodBye,

@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 	"xiaozhi-esp32-server-golang/internal/app/mqtt_server"
 	"xiaozhi-esp32-server-golang/internal/app/server/chat"
 	"xiaozhi-esp32-server-golang/internal/app/server/mqtt_udp"
+	"xiaozhi-esp32-server-golang/internal/app/server/notify"
 	"xiaozhi-esp32-server-golang/internal/app/server/types"
 	"xiaozhi-esp32-server-golang/internal/app/server/websocket"
 	"xiaozhi-esp32-server-golang/internal/data/history"
+	msg_types "xiaozhi-esp32-server-golang/internal/data/msg"
+	db_redis "xiaozhi-esp32-server-golang/internal/db/redis"
 	user_config "xiaozhi-esp32-server-golang/internal/domain/config"
 	config_types "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
@@ -33,7 +37,8 @@ type App struct {
 	mqttUdpMu      sync.RWMutex
 
 	// ChatManager管理 - 使用concurrent map
-	chatManagers cmap.ConcurrentMap[string, *chat.ChatManager]
+	chatManagers  cmap.ConcurrentMap[string, *chat.ChatManager]
+	notifyService *notify.NotifyService
 }
 
 func NewApp() *App {
@@ -41,6 +46,7 @@ func NewApp() *App {
 	app := &App{
 		chatManagers: cmap.New[*chat.ChatManager](),
 	}
+	app.initNotifyService()
 	mcp.RegisterCurrentDeviceTransportResolver(func(deviceID string) string {
 		chatManager, exists := app.GetChatManager(deviceID)
 		if !exists || chatManager == nil {
@@ -176,10 +182,18 @@ func (app *App) newUdpServer() (*mqtt_udp.UdpServer, error) {
 
 func (app *App) newWebSocketServer() *websocket.WebSocketServer {
 	port := viper.GetInt("websocket.port")
+	var notifyHandler http.HandlerFunc
+	if app.notifyService != nil {
+		notifyHandler = app.notifyService.HandleStream
+	}
 	return websocket.NewWebSocketServer(
 		port,
 		websocket.WithOnNewConnection(app.OnNewConnection),
 		websocket.WithOnOpenClawResponse(app.OnOpenClawResponse),
+		websocket.WithNotifyHandler(notifyHandler),
+		websocket.WithOnInjectMsgHandler(func(ctx context.Context, body map[string]interface{}) (string, error) {
+			return app.HandleInjectMsg(ctx, config_types.EventHandleMessageInject, body)
+		}),
 		websocket.WithOnInjectMessage(func(deviceID, message string, skipLlm bool, autoListen bool) error {
 			chatManager, exists := app.GetChatManager(deviceID)
 			if !exists || chatManager == nil {
@@ -188,6 +202,20 @@ func (app *App) newWebSocketServer() *websocket.WebSocketServer {
 			return chatManager.InjectMessage(message, skipLlm, autoListen)
 		}),
 	)
+}
+
+func (app *App) initNotifyService() {
+	secretKey := resolveNotifySecretKey()
+	publicBaseURL := resolveNotifyPublicBaseURL()
+	if strings.Contains(publicBaseURL, "://127.0.0.1") || strings.Contains(publicBaseURL, "://localhost") {
+		log.Warnf("NotifyService: publicBaseURL resolved to loopback %s; real ESP32 devices require notify.public_url or ota.external.websocket.url", publicBaseURL)
+	} else {
+		log.Infof("NotifyService: publicBaseURL=%s", publicBaseURL)
+	}
+
+	redisClient := db_redis.GetClient()
+	app.notifyService = notify.NewNotifyService(secretKey, publicBaseURL, redisClient, app.resolveNotifyTTS)
+	app.notifyService.SetBaseURLResolver(resolveNotifyPublicBaseURL)
 }
 
 func (app *App) startMqttServer() error {
@@ -511,10 +539,16 @@ func (a *App) registerHandler() {
 // 向客户端注入消息
 func (a *App) HandleInjectMsg(ctx context.Context, eventType string, eventData map[string]interface{}) (string, error) {
 	type InjectMsg struct {
-		SkipLlm    bool   `json:"skip_llm"`
-		AutoListen *bool  `json:"auto_listen"`
-		DeviceId   string `json:"device_id"`
-		Message    string `json:"message"`
+		Mode        string                    `json:"mode"`
+		SkipLlm     bool                      `json:"skip_llm"`
+		AutoListen  *bool                     `json:"auto_listen"`
+		DeviceId    string                    `json:"device_id"`
+		Message     string                    `json:"message"`
+		Voice       string                    `json:"voice,omitempty"`
+		TTSConfigID string                    `json:"tts_config_id,omitempty"`
+		Speed       float64                   `json:"speed,omitempty"`
+		AudioURL    string                    `json:"audio_url,omitempty"`
+		Subtitles   []msg_types.NotifySubtitle `json:"subtitles,omitempty"`
 	}
 	bodyBytes, _ := json.Marshal(eventData)
 	var msg InjectMsg
@@ -524,21 +558,66 @@ func (a *App) HandleInjectMsg(ctx context.Context, eventType string, eventData m
 		return "", fmt.Errorf("HandleInjectMsg error")
 	}
 
+	msg.DeviceId = strings.TrimSpace(msg.DeviceId)
+	msg.Message = strings.TrimSpace(msg.Message)
+	msg.AudioURL = strings.TrimSpace(msg.AudioURL)
+	mode := strings.ToLower(strings.TrimSpace(msg.Mode))
+
 	// 验证必要参数
 	if msg.DeviceId == "" {
 		log.Errorf("HandleInjectMsg: device_id is required")
 		return "", fmt.Errorf("device_id is required")
 	}
-	if msg.Message == "" {
+	if mode == "notify" {
+		if msg.Message == "" && msg.AudioURL == "" {
+			log.Errorf("HandleInjectMsg: message or audio_url is required")
+			return "", fmt.Errorf("message or audio_url is required")
+		}
+	} else if msg.Message == "" {
 		log.Errorf("HandleInjectMsg: message is required")
 		return "", fmt.Errorf("message is required")
 	}
 
-	// 获取指定设备的ChatManager
+	// 获取指定设备的ChatManager并确认设备当前在线
 	chatManager, exists := a.GetChatManager(msg.DeviceId)
-	if !exists {
+	if !exists || chatManager == nil {
 		log.Errorf("HandleInjectMsg: device %s not found or offline", msg.DeviceId)
 		return "", fmt.Errorf("device %s not found or offline", msg.DeviceId)
+	}
+
+	// 判定是否为单向异步语音通知模式 (PR #2191)
+	if mode == "notify" {
+		if chatManager.GetTransportType() == "" {
+			log.Errorf("HandleInjectMsg: device %s transport is offline", msg.DeviceId)
+			return "", fmt.Errorf("device %s not found or offline", msg.DeviceId)
+		}
+		log.Infof("HandleInjectMsg: processing notify mode for device %s", msg.DeviceId)
+		if a.notifyService == nil {
+			return "", fmt.Errorf("notify service not initialized")
+		}
+
+		prepareResult, err := a.notifyService.PrepareNotify(ctx, notify.PrepareNotifyRequest{
+			DeviceID:    msg.DeviceId,
+			Text:        msg.Message,
+			Voice:       msg.Voice,
+			TTSConfigID: msg.TTSConfigID,
+			Speed:       msg.Speed,
+			AudioURL:    msg.AudioURL,
+			Subtitles:   msg.Subtitles,
+		})
+		if err != nil {
+			log.Errorf("HandleInjectMsg: prepare notify failed: %v", err)
+			return "", fmt.Errorf("prepare notify failed: %w", err)
+		}
+
+		if err := chatManager.SendNotify(prepareResult.AudioURL, prepareResult.Subtitles); err != nil {
+			log.Errorf("HandleInjectMsg: send notify to device %s failed: %v", msg.DeviceId, err)
+			return "", fmt.Errorf("send notify failed: %w", err)
+		}
+
+		log.Infof("HandleInjectMsg: successfully sent notify to device %s audio_url=%s subtitles_count=%d",
+			msg.DeviceId, prepareResult.AudioURL, len(prepareResult.Subtitles))
+		return "notify message sent successfully", nil
 	}
 
 	autoListen := true
@@ -549,7 +628,7 @@ func (a *App) HandleInjectMsg(ctx context.Context, eventType string, eventData m
 	log.Debugf("HandleInjectMsg: injecting message to device %s, skip_llm: %v, auto_listen: %v, message: %s",
 		msg.DeviceId, msg.SkipLlm, autoListen, msg.Message)
 
-	// 使用ChatManager的公开方法注入消息
+	// 使用ChatManager的公开方法注入消息 (speak/会话模式)
 	err = chatManager.InjectMessage(msg.Message, msg.SkipLlm, autoListen)
 	if err != nil {
 		log.Errorf("HandleInjectMsg: failed to inject message to device %s: %v", msg.DeviceId, err)
