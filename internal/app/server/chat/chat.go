@@ -1207,9 +1207,18 @@ func (c *ChatManager) GetServerTransport() *ServerTransport {
 	return c.serverTransport
 }
 
-func (c *ChatManager) SendNotify(audioURL string, subtitles []msg.NotifySubtitle) error {
+func (c *ChatManager) SendNotify(audioURL string, subtitles []NotifySubtitle) error {
 	if c == nil || c.serverTransport == nil {
 		return fmt.Errorf("chat manager or server transport is nil")
+	}
+	if c.ctx != nil && c.ctx.Err() != nil {
+		return fmt.Errorf("device %s connection is closed", c.GetDeviceId())
+	}
+	if c.serverTransport.IsClosed() {
+		return fmt.Errorf("device %s transport is closed", c.GetDeviceId())
+	}
+	if awareTransport, ok := c.transport.(brokerOnlineAwareTransport); ok && !awareTransport.IsBrokerOnline() {
+		return fmt.Errorf("device %s is offline", c.GetDeviceId())
 	}
 	return c.serverTransport.SendNotify(audioURL, subtitles)
 }

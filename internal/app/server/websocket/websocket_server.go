@@ -1,10 +1,12 @@
 package websocket
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -281,11 +283,28 @@ func (s *WebSocketServer) handleInjectMsg(w http.ResponseWriter, r *http.Request
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		deviceID, _ := body["device_id"].(string)
+		message, _ := body["message"].(string)
+		mode, _ := body["mode"].(string)
+		skipLlm, _ := body["skip_llm"].(bool)
+		autoListen := true
+		if al, ok := body["auto_listen"].(bool); ok {
+			autoListen = al
+		}
+		respMsg := message
+		if strings.TrimSpace(respMsg) == "" {
+			respMsg = result
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"message": result,
-			"data":    body,
+			"success":     true,
+			"device_id":   deviceID,
+			"message":     respMsg,
+			"mode":        mode,
+			"skip_llm":    skipLlm,
+			"auto_listen": autoListen,
+			"result":      result,
+			"data":        body,
 		})
 		return
 	}

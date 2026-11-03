@@ -13,17 +13,28 @@ import (
 
 // StreamOpusToOgg 将 Opus 帧数据通道流式封装为 Ogg Opus 格式并写入 io.Writer
 func StreamOpusToOgg(ctx context.Context, w io.Writer, flusher http.Flusher, opusChan <-chan []byte, sampleRate int, channels int, frameDurationMs int) error {
+	return streamOpusToOggWithFirstPacket(ctx, w, flusher, nil, opusChan, sampleRate, channels, frameDurationMs)
+}
+
+// streamOpusToOggWithFirstPacket 支持传入已预取的首帧 Opus 数据并继续消费 opusChan，
+// 使用单帧延迟写出（1-packet lookahead）直接将最后一帧音频页标记为 EOS (0x04)，
+// 按 RFC 7845 固定 48kHz 时钟计算 Granule Position。
+func streamOpusToOggWithFirstPacket(
+	ctx context.Context,
+	w io.Writer,
+	flusher http.Flusher,
+	firstPacket []byte,
+	opusChan <-chan []byte,
+	sampleRate int,
+	channels int,
+	frameDurationMs int,
+) error {
 	sampleRate = NormalizeOpusSampleRate(sampleRate)
 	if channels < 1 || channels > 2 {
 		channels = 1
 	}
 	if frameDurationMs <= 0 {
 		frameDurationMs = 60
-	}
-
-	frameSamplesPerChannel := sampleRate * frameDurationMs / 1000
-	if frameSamplesPerChannel <= 0 {
-		frameSamplesPerChannel = 960
 	}
 
 	// 随机生成 32 位 Stream Serial Number
@@ -38,25 +49,34 @@ func StreamOpusToOgg(ctx context.Context, w io.Writer, flusher http.Flusher, opu
 		}
 	}
 
-	// 1. Page 0: OpusHead (BOS, headerType = 0x02)
-	headPage := BuildOggPage(serial, 0, 0x02, 0, BuildOpusHeadPacket(sampleRate, channels))
+	var sequence uint32
+
+	// 1. Page 0: OpusHead (BOS, headerType = 0x02, granule = 0)
+	headPage, nextSeq := BuildOggPages(serial, sequence, 0x02, 0, BuildOpusHeadPacket(sampleRate, channels))
 	if _, err := w.Write(headPage); err != nil {
 		return fmt.Errorf("write OpusHead page failed: %w", err)
 	}
+	sequence = nextSeq
 	flush()
 
-	// 2. Page 1: OpusTags (headerType = 0x00)
-	tagsPage := BuildOggPage(serial, 1, 0x00, 0, BuildOpusTagsPacket())
+	// 2. Page 1: OpusTags (headerType = 0x00, granule = 0)
+	tagsPage, nextSeq := BuildOggPages(serial, sequence, 0x00, 0, BuildOpusTagsPacket())
 	if _, err := w.Write(tagsPage); err != nil {
 		return fmt.Errorf("write OpusTags page failed: %w", err)
 	}
+	sequence = nextSeq
 	flush()
 
-	// 3. 循环流式读取 Opus 帧并写入 Ogg Page
-	var sequence uint32 = 2
-	var granulePosition uint64 = 0
+	// 3. 循环流式读取 Opus 帧并写入 Ogg Page（48kHz Granule Position + 尾帧直接打 EOS）
+	var granulePosition uint64
 	var prevPacket []byte
 	packetCount := 0
+
+	if len(firstPacket) > 0 {
+		granulePosition += OpusPacketSamples48k(firstPacket, frameDurationMs)
+		prevPacket = firstPacket
+		packetCount = 1
+	}
 
 	for {
 		select {
@@ -65,18 +85,19 @@ func StreamOpusToOgg(ctx context.Context, w io.Writer, flusher http.Flusher, opu
 			return ctx.Err()
 		case packet, ok := <-opusChan:
 			if !ok {
-				// opusChan 关闭，准备写入 EOS Page
 				if prevPacket != nil {
-					// 最后一包标记为 EOS (0x04)
-					eosPage := BuildOggPage(serial, sequence, 0x04, granulePosition, prevPacket)
+					// 最后一包直接标记为 EOS (0x04)
+					eosPage, _ := BuildOggPages(serial, sequence, 0x04, granulePosition, prevPacket)
 					if _, err := w.Write(eosPage); err != nil {
 						return fmt.Errorf("write EOS page failed: %w", err)
 					}
 					flush()
 				} else {
-					// 没有音频数据，发送空 EOS page
-					eosPage := BuildOggPage(serial, sequence, 0x04, granulePosition, nil)
-					_, _ = w.Write(eosPage)
+					// 直接调用且无任何音频帧时，发送 page_segments=0 的标准空 EOS 页
+					eosPage := BuildOggPage(serial, sequence, 0x04, 0, nil)
+					if _, err := w.Write(eosPage); err != nil {
+						return fmt.Errorf("write empty EOS page failed: %w", err)
+					}
 					flush()
 				}
 				log.Debugf("StreamOpusToOgg: completed successfully, total %d packets", packetCount)
@@ -88,16 +109,15 @@ func StreamOpusToOgg(ctx context.Context, w io.Writer, flusher http.Flusher, opu
 			}
 
 			if prevPacket != nil {
-				// 输出前一个普通帧
-				page := BuildOggPage(serial, sequence, 0x00, granulePosition, prevPacket)
+				page, nextSeq := BuildOggPages(serial, sequence, 0x00, granulePosition, prevPacket)
 				if _, err := w.Write(page); err != nil {
 					return fmt.Errorf("write audio page %d failed: %w", sequence, err)
 				}
+				sequence = nextSeq
 				flush()
-				sequence++
 			}
 
-			granulePosition += uint64(frameSamplesPerChannel)
+			granulePosition += OpusPacketSamples48k(packet, frameDurationMs)
 			prevPacket = packet
 			packetCount++
 		}

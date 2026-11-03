@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -90,7 +91,7 @@ func (uc *UserController) InjectMessage(c *gin.Context) {
 
 	var req struct {
 		DeviceID    string      `json:"device_id" binding:"required"`
-		Message     string      `json:"message" binding:"required"`
+		Message     string      `json:"message"`
 		Mode        string      `json:"mode"` // "notify" (单向异步通知) 或 "speak" (默认双向对话)
 		SkipLlm     bool        `json:"skip_llm"`
 		AutoListen  *bool       `json:"auto_listen"`
@@ -104,6 +105,31 @@ func (uc *UserController) InjectMessage(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: " + err.Error()})
 		return
+	}
+
+	req.DeviceID = strings.TrimSpace(req.DeviceID)
+	req.Message = strings.TrimSpace(req.Message)
+	req.Mode = strings.ToLower(strings.TrimSpace(req.Mode))
+	req.Voice = strings.TrimSpace(req.Voice)
+	req.TTSConfigID = strings.TrimSpace(req.TTSConfigID)
+	req.AudioURL = strings.TrimSpace(req.AudioURL)
+
+	if req.Mode == "notify" {
+		if req.Message == "" && req.AudioURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: notify 模式下 message 与 audio_url 不能同时为空"})
+			return
+		}
+	} else if req.Message == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: message 不能为空"})
+		return
+	}
+
+	if req.AudioURL != "" {
+		parsedURL, err := url.Parse(req.AudioURL)
+		if err != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误: audio_url 必须为合法的 http/https 地址"})
+			return
+		}
 	}
 
 	// 验证设备是否属于当前用户

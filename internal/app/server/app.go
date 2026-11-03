@@ -21,7 +21,6 @@ import (
 	config_types "xiaozhi-esp32-server-golang/internal/domain/config/types"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	"xiaozhi-esp32-server-golang/internal/domain/openclaw"
-	"xiaozhi-esp32-server-golang/internal/domain/tts"
 	"xiaozhi-esp32-server-golang/internal/pool"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
@@ -206,65 +205,17 @@ func (app *App) newWebSocketServer() *websocket.WebSocketServer {
 }
 
 func (app *App) initNotifyService() {
-	secretKey := []byte(viper.GetString("manager.auth_token"))
-	if len(secretKey) == 0 {
-		secretKey = []byte(viper.GetString("internal_auth_token"))
-	}
-	publicBaseURL := viper.GetString("server.public_url")
-	if publicBaseURL == "" {
-		publicBaseURL = viper.GetString("notify.public_url")
-	}
-	if publicBaseURL == "" {
-		publicBaseURL = fmt.Sprintf("http://127.0.0.1:%d", viper.GetInt("websocket.port"))
+	secretKey := resolveNotifySecretKey()
+	publicBaseURL := resolveNotifyPublicBaseURL()
+	if strings.Contains(publicBaseURL, "://127.0.0.1") || strings.Contains(publicBaseURL, "://localhost") {
+		log.Warnf("NotifyService: publicBaseURL resolved to loopback %s; real ESP32 devices require notify.public_url or ota.external.websocket.url", publicBaseURL)
+	} else {
+		log.Infof("NotifyService: publicBaseURL=%s", publicBaseURL)
 	}
 
 	redisClient := db_redis.GetClient()
-
-	ttsResolver := func(ctx context.Context, config *notify.NotifyConfig) (notify.TTSStreamProvider, func(), error) {
-		chatManager, exists := app.GetChatManager(config.DeviceID)
-		var deviceConfig config_types.UConfig
-		if exists && chatManager != nil && chatManager.GetClientState() != nil {
-			deviceConfig = chatManager.GetClientState().DeviceConfig
-		}
-
-		ttsConfig := make(map[string]interface{})
-		for k, v := range deviceConfig.Tts.Config {
-			ttsConfig[k] = v
-		}
-		ttsProvider := deviceConfig.Tts.Provider
-		if ttsProvider == "" {
-			ttsProvider = viper.GetString("tts.provider")
-			if ttsProvider == "" {
-				ttsProvider = "edge"
-			}
-		}
-
-		if config.Voice != "" {
-			ttsConfig["voice"] = config.Voice
-			ttsConfig["spk_id"] = config.Voice
-		}
-		if config.Speed > 0 {
-			ttsConfig["speed"] = config.Speed
-		}
-
-		providerLabel := ttsProvider
-		if config.Voice != "" {
-			providerLabel = fmt.Sprintf("%s:%s", ttsProvider, config.Voice)
-		}
-
-		ttsWrapper, err := pool.Acquire[tts.TTSProvider]("tts", providerLabel, ttsConfig)
-		if err == nil && ttsWrapper != nil {
-			return ttsWrapper.GetResource(), ttsWrapper.Release, nil
-		}
-
-		p, err := tts.GetTTSProvider(providerLabel, ttsConfig)
-		if err != nil {
-			return nil, nil, err
-		}
-		return p, func() { _ = p.Close() }, nil
-	}
-
-	app.notifyService = notify.NewNotifyService(secretKey, publicBaseURL, redisClient, ttsResolver)
+	app.notifyService = notify.NewNotifyService(secretKey, publicBaseURL, redisClient, app.resolveNotifyTTS)
+	app.notifyService.SetBaseURLResolver(resolveNotifyPublicBaseURL)
 }
 
 func (app *App) startMqttServer() error {
@@ -607,25 +558,39 @@ func (a *App) HandleInjectMsg(ctx context.Context, eventType string, eventData m
 		return "", fmt.Errorf("HandleInjectMsg error")
 	}
 
+	msg.DeviceId = strings.TrimSpace(msg.DeviceId)
+	msg.Message = strings.TrimSpace(msg.Message)
+	msg.AudioURL = strings.TrimSpace(msg.AudioURL)
+	mode := strings.ToLower(strings.TrimSpace(msg.Mode))
+
 	// 验证必要参数
 	if msg.DeviceId == "" {
 		log.Errorf("HandleInjectMsg: device_id is required")
 		return "", fmt.Errorf("device_id is required")
 	}
-	if msg.Message == "" && msg.AudioURL == "" {
-		log.Errorf("HandleInjectMsg: message or audio_url is required")
-		return "", fmt.Errorf("message or audio_url is required")
+	if mode == "notify" {
+		if msg.Message == "" && msg.AudioURL == "" {
+			log.Errorf("HandleInjectMsg: message or audio_url is required")
+			return "", fmt.Errorf("message or audio_url is required")
+		}
+	} else if msg.Message == "" {
+		log.Errorf("HandleInjectMsg: message is required")
+		return "", fmt.Errorf("message is required")
 	}
 
-	// 获取指定设备的ChatManager
+	// 获取指定设备的ChatManager并确认设备当前在线
 	chatManager, exists := a.GetChatManager(msg.DeviceId)
-	if !exists {
+	if !exists || chatManager == nil {
 		log.Errorf("HandleInjectMsg: device %s not found or offline", msg.DeviceId)
 		return "", fmt.Errorf("device %s not found or offline", msg.DeviceId)
 	}
 
 	// 判定是否为单向异步语音通知模式 (PR #2191)
-	if strings.ToLower(strings.TrimSpace(msg.Mode)) == "notify" {
+	if mode == "notify" {
+		if chatManager.GetTransportType() == "" {
+			log.Errorf("HandleInjectMsg: device %s transport is offline", msg.DeviceId)
+			return "", fmt.Errorf("device %s not found or offline", msg.DeviceId)
+		}
 		log.Infof("HandleInjectMsg: processing notify mode for device %s", msg.DeviceId)
 		if a.notifyService == nil {
 			return "", fmt.Errorf("notify service not initialized")
