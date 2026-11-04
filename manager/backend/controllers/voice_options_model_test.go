@@ -28,3 +28,36 @@ func TestVoiceOptionsUseUnsavedModelOverride(t *testing.T) {
 		t.Fatalf("saved voices = %#v, override voices = %#v", saved, overridden)
 	}
 }
+
+func TestOpenAIVoiceOptionsIncludeConfiguredCustomVoice(t *testing.T) {
+	db := previewTestDB(t)
+	cfg := models.Config{
+		Type: "tts", ConfigID: "openai_custom_voice", Provider: "openai", Enabled: true,
+		JsonData: `{"model":"gpt-4o-mini-tts","voice":"custom_voice_id"}`,
+	}
+	if err := db.Create(&cfg).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	voices, err := getVoiceOptionsForUser(db, nil, 0, "openai", cfg.ConfigID, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCustom := false
+	foundAlloy := false
+	for _, v := range voices {
+		if v.Value == "custom_voice_id" {
+			foundCustom = true
+		}
+		if v.Value == "alloy" {
+			foundAlloy = true
+			if v.Label == "alloy" {
+				t.Fatalf("expected descriptive label for built-in voice alloy, got %q", v.Label)
+			}
+		}
+	}
+	if !foundCustom || !foundAlloy {
+		t.Fatalf("voices = %#v, want both custom_voice_id and alloy", voices)
+	}
+}
+

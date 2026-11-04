@@ -383,6 +383,23 @@ var VoiceOptions = map[string][]VoiceOption{
 		{Value: "douji", Label: "动动动物圈douji音色"},
 		{Value: "luodo", Label: "动动动物圈luodo音色"},
 	},
+
+	// OpenAI TTS 常用内置音色列表
+	// 参考：https://platform.openai.com/docs/guides/text-to-speech
+	// 说明：OpenAI 官方协议未提供列举音色接口，这里维护官方内置音色候选项，同时前端支持自定义输入。
+	"openai": {
+		{Value: "alloy", Label: "Alloy（中性均衡，默认音色）"},
+		{Value: "ash", Label: "Ash（沉稳男声）"},
+		{Value: "ballad", Label: "Ballad（温暖抒情）"},
+		{Value: "coral", Label: "Coral（清晰女声）"},
+		{Value: "echo", Label: "Echo（温和男声）"},
+		{Value: "fable", Label: "Fable（英式叙事）"},
+		{Value: "onyx", Label: "Onyx（深沉男声）"},
+		{Value: "nova", Label: "Nova（活力女声）"},
+		{Value: "sage", Label: "Sage（知性女声）"},
+		{Value: "shimmer", Label: "Shimmer（轻柔女声）"},
+		{Value: "verse", Label: "Verse（自然朗读）"},
+	},
 }
 
 // GetVoiceOptionsByProvider 根据provider获取音色列表
