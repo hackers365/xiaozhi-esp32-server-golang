@@ -25,7 +25,7 @@ services:
 
   # 主程序服务
   main-server:
-    image: ghcr.io/hackers365/xiaozhi_server:0.6.0
+    image: ghcr.io/hackers365/xiaozhi_server:0.6.5
     container_name: xiaozhi-main-server
     command: ["/workspace/bin/xiaozhi_server", "-c", "/workspace/config/config.yaml"]
     ports:
@@ -53,7 +53,7 @@ services:
 
   # 后端管理服务
   backend:
-    image: ghcr.io/hackers365/xiaozhi_manager_backend:0.6.0
+    image: ghcr.io/hackers365/xiaozhi_manager_backend:0.6.5
     container_name: xiaozhi-backend
     ports:
       - "8081:8080"        # 后端管理服务 端口 映射至宿主机 28080
@@ -79,7 +79,7 @@ services:
 
   # 前端管理服务
   frontend:
-    image: ghcr.io/hackers365/xiaozhi_manager_frontend:0.6.0
+    image: ghcr.io/hackers365/xiaozhi_manager_frontend:0.6.5
     container_name: xiaozhi-frontend
     ports:
       - "8080:80"           # 前端管理服务 端口 映射至宿主机 18080
