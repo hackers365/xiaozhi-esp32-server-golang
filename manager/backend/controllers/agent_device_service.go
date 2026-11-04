@@ -1012,7 +1012,20 @@ func getVoiceOptionsForUser(db *gorm.DB, c *gin.Context, targetUserID uint, prov
 			systemVoices = GetAliyunQwenVoicesByModel(qc.Model)
 		}
 	} else {
-		systemVoices = GetVoiceOptionsByProvider(provider)
+		systemVoices = append([]VoiceOption(nil), GetVoiceOptionsByProvider(provider)...)
+		if provider == "openai" && configID != "" && db != nil {
+			var cfg models.Config
+			if err := db.Where("type = ? AND config_id = ?", "tts", configID).First(&cfg).Error; err == nil && cfg.JsonData != "" {
+				var oc struct {
+					Voice string `json:"voice"`
+				}
+				if err := json.Unmarshal([]byte(cfg.JsonData), &oc); err == nil {
+					if customVoice := strings.TrimSpace(oc.Voice); customVoice != "" {
+						systemVoices = append(systemVoices, VoiceOption{Value: customVoice, Label: customVoice})
+					}
+				}
+			}
+		}
 	}
 
 	result := make([]VoiceOption, 0, len(systemVoices)+8)

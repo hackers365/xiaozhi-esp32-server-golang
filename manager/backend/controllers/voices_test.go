@@ -98,3 +98,22 @@ func TestUnknownAliyunModelDoesNotMasqueradeAsQwen3(t *testing.T) {
 		t.Fatalf("unknown model returned %d system voices, want 0", len(voices))
 	}
 }
+
+func TestOpenAIVoiceOptions(t *testing.T) {
+	voices := GetVoiceOptionsByProvider("openai")
+	if len(voices) == 0 {
+		t.Fatal("GetVoiceOptionsByProvider(\"openai\") returned empty slice, want built-in OpenAI voices")
+	}
+
+	expected := []string{"alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"}
+	seen := make(map[string]bool, len(voices))
+	for _, v := range voices {
+		seen[v.Value] = true
+	}
+	for _, want := range expected {
+		if !seen[want] {
+			t.Errorf("GetVoiceOptionsByProvider(\"openai\") missing expected voice %q", want)
+		}
+	}
+}
+
