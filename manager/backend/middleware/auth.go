@@ -27,8 +27,9 @@ type signingConfig struct {
 var currentSigningConfig atomic.Pointer[signingConfig]
 
 func ConfigureJWT(secret string, expireHour int) error {
-	if strings.TrimSpace(secret) == "" {
-		return errors.New("JWT secret is empty")
+	secret = strings.TrimSpace(secret)
+	if len(secret) < 32 || secret == "xiaozhi_admin_secret_key" {
+		return errors.New("JWT secret must be a unique random value of at least 32 bytes")
 	}
 	if expireHour <= 0 {
 		expireHour = 24

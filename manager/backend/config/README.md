@@ -23,13 +23,15 @@
     "database": "xiaozhi_admin" // 数据库名称
   },
   "jwt": {
-    "secret": "your_secret_key", // JWT签名密钥
+    "secret": "", // 启动前必须配置至少32字节的随机密钥，或设置JWT_SECRET环境变量
     "expire_hour": 24           // Token过期时间(小时)
   }
 }
 ```
 
 ## 使用方法
+
+启动后端前，请生成独立 JWT 密钥并设置 `JWT_SECRET`（例如 `openssl rand -hex 32`），或写入配置文件的 `jwt.secret`。环境变量优先。重启及多实例部署应保持同一密钥；轮换密钥会使已有 JWT 失效。
 
 ### 1. 命令行参数
 

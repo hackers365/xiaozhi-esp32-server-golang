@@ -17,7 +17,7 @@
     }
   },
   "jwt": {
-    "secret": "xiaozhi_admin_secret_key",
+    "secret": "",
     "expire_hour": 24
   },
   "internal_auth_token": "xiaozhi_admin_secret_key",

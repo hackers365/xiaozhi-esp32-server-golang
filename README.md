@@ -40,6 +40,8 @@ xiaozhi-esp32-server-golang 是一款高性能、全流式的 AI 后端服务，
 - **Release 页面**：<https://github.com/hackers365/xiaozhi-esp32-server-golang/releases>
 - **使用教程**：[doc/quickstart_bundle_tutorial.md](doc/quickstart_bundle_tutorial.md)
 
+启动前请设置 `JWT_SECRET` 为独立生成的随机密钥（至少 32 字节；可用 `openssl rand -hex 32` 生成），或在配置文件 `jwt.secret` 中设置。环境变量优先；重启及多实例需要保持密钥一致，轮换后原有令牌失效。
+
 启动后访问 **http://<服务器IP或域名>:8080** 进入 Web 控制台进行配置。
 
 ### 方式二：Docker 部署
