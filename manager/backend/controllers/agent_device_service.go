@@ -1011,6 +1011,40 @@ func getVoiceOptionsForUser(db *gorm.DB, c *gin.Context, targetUserID uint, prov
 			}
 			systemVoices = GetAliyunQwenVoicesByModel(qc.Model)
 		}
+	} else if provider == "doubao" || provider == "doubao_ws" {
+		resolvedModel := strings.TrimSpace(overrideModel)
+		configuredVoice := ""
+		if configID != "" && db != nil {
+			var cfg models.Config
+			if err := db.Where("type = ? AND config_id = ?", "tts", configID).First(&cfg).Error; err == nil && cfg.JsonData != "" {
+				var dc struct {
+					Model string `json:"model"`
+					Voice string `json:"voice"`
+				}
+				if err := json.Unmarshal([]byte(cfg.JsonData), &dc); err == nil {
+					if resolvedModel == "" {
+						resolvedModel = strings.TrimSpace(dc.Model)
+					}
+					configuredVoice = strings.TrimSpace(dc.Voice)
+				}
+			}
+		}
+		if resolvedModel == "" {
+			resolvedModel = modelSeedTTS20StandardBackend
+		}
+		systemVoices = GetDoubaoVoicesByModel(resolvedModel)
+		if configuredVoice != "" {
+			found := false
+			for _, v := range systemVoices {
+				if strings.TrimSpace(v.Value) == configuredVoice {
+					found = true
+					break
+				}
+			}
+			if !found {
+				systemVoices = append([]VoiceOption{{Value: configuredVoice, Label: configuredVoice}}, systemVoices...)
+			}
+		}
 	} else {
 		systemVoices = append([]VoiceOption(nil), GetVoiceOptionsByProvider(provider)...)
 		if provider == "openai" && configID != "" && db != nil {

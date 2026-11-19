@@ -159,20 +159,24 @@ tts:
     response_format: "mp3"
     speed: 1.0
     stream: true
-  # 豆包TTS配置（HTTP方式）
-  doubao: #基本废掉，不支持流式
-    appid: "6886011847"                  # 应用ID
-    access_token: "access_token"         # 访问令牌
-    model: "seed-tts-1.1"                # 模型
-    voice: "BV001_streaming"             # 语音模型
+  # 豆包TTS配置（HTTP 单向流方式）
+  # 鉴权支持新版控制台 api_key（推荐），或旧版控制台 appid + access_token（二选一）
+  doubao:
+    api_key: ""                          # 新版控制台 API Key（推荐；填写后优先使用 X-Api-Key 鉴权）
+    appid: ""                            # 旧版控制台应用ID（使用 api_key 时留空）
+    access_token: ""                     # 旧版控制台访问令牌（使用 api_key 时留空）
+    model: "seed-tts-2.0-standard"       # 模型：seed-tts-2.0-standard / seed-tts-2.0-expressive / seed-tts-1.1
+    resource_id: ""                      # 可选，留空自动按模型映射（如 seed-tts-2.0 / seed-icl-2.0）
+    voice: "zh_female_vv_uranus_bigtts"  # 音色ID，需与所选模型版本对应
     api_url: "https://openspeech.bytedance.com/api/v3/tts/unidirectional"  # API地址
-  # 豆包TTS配置（WebSocket方式），支持流式输出
+  # 豆包TTS配置（WebSocket 单向流方式，推荐），支持流式输出
   doubao_ws:
-    appid: "6886011847"                         # 应用ID
-    access_token: "access_token"                # 访问令牌
-    model: "seed-tts-1.1"                       # 模型
-    resource_id: ""                             # 可选，建议填写控制台里的实例 ID，如 TTS-SeedTTS2.xxxxx
-    voice: ""                                   # 语音模型，需按账号实际开通的 v3 音色填写
+    api_key: ""                                 # 新版控制台 API Key（推荐；填写后优先使用 X-Api-Key 鉴权）
+    appid: ""                                   # 旧版控制台应用ID（使用 api_key 时留空）
+    access_token: ""                            # 旧版控制台访问令牌（使用 api_key 时留空）
+    model: "seed-tts-2.0-standard"              # 模型：seed-tts-2.0-standard / seed-tts-2.0-expressive / seed-tts-1.1
+    resource_id: ""                             # 可选，留空自动按模型映射（如 seed-tts-2.0 / seed-icl-2.0）
+    voice: "zh_female_vv_uranus_bigtts"         # 音色ID，需按账号实际开通的音色填写
     ws_url: "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream"  # WebSocket 地址
   # CosyVoice TTS配置
   cosyvoice:

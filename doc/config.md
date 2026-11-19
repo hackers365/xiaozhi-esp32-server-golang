@@ -156,18 +156,22 @@ asr:
 # 语音合成（TTS）配置
 tts:
   provider: "doubao_ws"  # 选择tts的类型 doubao, doubao_ws, cosyvoice, xiaozhi等
+  # 豆包 TTS 支持新版控制台 api_key（X-Api-Key，推荐）或旧版控制台 appid + access_token（二选一）
   doubao:
-    appid: "你的appid"
-    access_token: "access_token"    # 需要修改为自己的
-    model: "seed-tts-1.1"
-    voice: "BV001_streaming"
+    api_key: ""                      # 新版控制台 API Key（推荐）
+    appid: ""                        # 旧版控制台 AppID（使用 api_key 时留空）
+    access_token: ""                 # 旧版控制台 Access Token（使用 api_key 时留空）
+    model: "seed-tts-2.0-standard"
+    resource_id: ""                  # 可选，留空自动按模型映射（如 seed-tts-2.0）
+    voice: "zh_female_vv_uranus_bigtts"
     api_url: "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
   doubao_ws:
-    appid: "你的appid"              # 需要修改为自己的
-    access_token: "access_token"    # 需要修改为自己的
-    model: "seed-tts-1.1"
-    resource_id: ""                 # 建议填写控制台里的实例 ID，如 TTS-SeedTTS2.xxxxx
-    voice: ""
+    api_key: ""                      # 新版控制台 API Key（推荐）
+    appid: ""                        # 旧版控制台 AppID（使用 api_key 时留空）
+    access_token: ""                 # 旧版控制台 Access Token（使用 api_key 时留空）
+    model: "seed-tts-2.0-standard"
+    resource_id: ""                  # 可选，留空自动按模型映射（如 seed-tts-2.0）
+    voice: "zh_female_vv_uranus_bigtts"
     ws_url: "wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream"
   cosyvoice:
     api_url: "https://tts.linkerai.cn/tts"  # 地址

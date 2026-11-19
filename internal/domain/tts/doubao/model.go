@@ -67,14 +67,18 @@ func inferDoubaoVoiceFamily(voice string) string {
 	switch {
 	case voice == "":
 		return "unknown"
+	case strings.HasPrefix(voice, "icl_uranus_"):
+		return "tts2"
 	case strings.HasPrefix(voice, "saturn_"):
 		return "tts2"
 	case strings.HasPrefix(voice, "s_"):
 		return "icl1"
 	case strings.HasPrefix(voice, "icl_"):
 		return "icl1"
-	case strings.Contains(voice, "_bigtts"):
+	case strings.Contains(voice, "_uranus_bigtts"):
 		return "tts2"
+	case strings.Contains(voice, "_bigtts"):
+		return "tts1_bigtts"
 	default:
 		return "tts1"
 	}
@@ -95,6 +99,9 @@ func resolveDoubaoTTSModel(model, voice string) (resolvedTTSModel, error) {
 	normalized := normalizeDoubaoModel(model)
 	if voiceFamily == "tts2" && normalized == modelSeedTTS11 {
 		normalized = modelSeedTTS20Standard
+	}
+	if voiceFamily == "tts1_bigtts" && (normalized == modelSeedTTS20Standard || normalized == modelSeedTTS20Expr) {
+		normalized = modelSeedTTS11
 	}
 	if normalized == "" {
 		switch voiceFamily {
@@ -184,7 +191,7 @@ func resolveDoubaoTTSModel(model, voice string) (resolvedTTSModel, error) {
 	if voiceFamily == "icl2" && resolved.ResourceID != resourceSeedICL20 {
 		return resolvedTTSModel{}, fmt.Errorf("豆包复刻 2.0 音色需要匹配 seed-icl-2.0 模型族")
 	}
-	if voiceFamily == "tts1" && strings.HasPrefix(resolved.ResourceID, "seed-icl-") {
+	if (voiceFamily == "tts1" || voiceFamily == "tts1_bigtts" || voiceFamily == "tts2") && strings.HasPrefix(resolved.ResourceID, "seed-icl-") {
 		return resolvedTTSModel{}, fmt.Errorf("豆包公版音色不能使用 ICL 复刻模型族")
 	}
 	if voiceFamily == "tts1" && resolved.ResourceID == resourceSeedTTS20 {

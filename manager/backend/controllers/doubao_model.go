@@ -49,26 +49,34 @@ func inferDoubaoVoiceFamilyBackend(voice string) string {
 	switch {
 	case voice == "":
 		return "unknown"
+	case strings.HasPrefix(voice, "icl_uranus_"):
+		return "tts2"
 	case strings.HasPrefix(voice, "saturn_"):
 		return "tts2"
 	case strings.HasPrefix(voice, "s_"):
 		return "icl1"
 	case strings.HasPrefix(voice, "icl_"):
 		return "icl1"
-	case strings.Contains(voice, "_bigtts"):
+	case strings.Contains(voice, "_uranus_bigtts"):
 		return "tts2"
+	case strings.Contains(voice, "_bigtts"):
+		return "tts1_bigtts"
 	default:
 		return "tts1"
 	}
 }
 
 func resolveDoubaoModelSelection(model, voice string) doubaoModelSelection {
+	voiceFamily := inferDoubaoVoiceFamilyBackend(voice)
 	normalized := normalizeDoubaoModelBackend(model)
-	if inferDoubaoVoiceFamilyBackend(voice) == "tts2" && normalized == modelSeedTTS11Backend {
+	if voiceFamily == "tts2" && normalized == modelSeedTTS11Backend {
 		normalized = modelSeedTTS20StandardBackend
 	}
+	if voiceFamily == "tts1_bigtts" && (normalized == modelSeedTTS20StandardBackend || normalized == modelSeedTTS20ExprBackend) {
+		normalized = modelSeedTTS11Backend
+	}
 	if normalized == "" {
-		switch inferDoubaoVoiceFamilyBackend(voice) {
+		switch voiceFamily {
 		case "icl2":
 			return doubaoModelSelection{
 				ConfigModel:  modelSeedICL20ExprBackend,

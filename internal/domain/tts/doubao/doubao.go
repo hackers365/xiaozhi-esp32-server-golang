@@ -46,7 +46,10 @@ func getHTTPClient() *http.Client {
 	return httpClient
 }
 
+const doubaoTTSStreamDoneCode = 20000000
+
 type DoubaoTTSProvider struct {
+	APIKey      string
 	AppID       string
 	AccessToken string
 	Model       string
@@ -86,6 +89,7 @@ type doubaoTTSV3Event struct {
 }
 
 func NewDoubaoTTSProvider(config map[string]interface{}) *DoubaoTTSProvider {
+	apiKey, _ := config["api_key"].(string)
 	appID, _ := config["appid"].(string)
 	accessToken, _ := config["access_token"].(string)
 	model, _ := config["model"].(string)
@@ -94,6 +98,7 @@ func NewDoubaoTTSProvider(config map[string]interface{}) *DoubaoTTSProvider {
 	apiURL, _ := config["api_url"].(string)
 
 	return &DoubaoTTSProvider{
+		APIKey:      strings.TrimSpace(apiKey),
 		AppID:       appID,
 		AccessToken: accessToken,
 		Model:       normalizeDoubaoModel(model),
@@ -167,7 +172,7 @@ func (p *DoubaoTTSProvider) streamHTTP(ctx context.Context, text string, sampleR
 	if err != nil {
 		return nil, fmt.Errorf("创建豆包 TTS 请求失败: %w", err)
 	}
-	headers := doubaoapi.NewTTSHeaders(p.AppID, p.AccessToken, resolved.ResourceID)
+	headers := doubaoapi.NewTTSHeadersWithAuth(p.APIKey, p.AppID, p.AccessToken, resolved.ResourceID)
 	for key, values := range headers {
 		for _, value := range values {
 			req.Header.Add(key, value)
@@ -228,6 +233,10 @@ func (p *DoubaoTTSProvider) decodeStreamResponse(ctx context.Context, body io.Re
 			_ = pipeWriter.CloseWithError(parseErr)
 			return
 		} else if event != nil {
+			if event.Code == doubaoTTSStreamDoneCode {
+				_ = pipeWriter.Close()
+				return
+			}
 			if writeErr := writeDoubaoTTSAudioChunk(pipeWriter, event); writeErr != nil {
 				_ = pipeWriter.CloseWithError(writeErr)
 				return
@@ -260,7 +269,7 @@ func parseDoubaoTTSStreamEvent(raw []byte) (*doubaoTTSV3Event, error) {
 	if err := json.Unmarshal([]byte(line), &event); err != nil {
 		return nil, fmt.Errorf("解析豆包 TTS 流式事件失败: %w", err)
 	}
-	if event.Code != 0 {
+	if event.Code != 0 && event.Code != doubaoTTSStreamDoneCode {
 		msg := strings.TrimSpace(event.Message)
 		if msg == "" {
 			msg = fmt.Sprintf("豆包 TTS 返回错误码 %d", event.Code)

@@ -23,24 +23,40 @@
     </el-form-item>
 
     <template v-if="model.provider === 'doubao_ws'">
-      <el-form-item label="应用ID" prop="doubao_ws.appid">
-        <el-input v-model="model.doubao_ws.appid" placeholder="请输入应用ID" />
+      <el-form-item label="认证方式" prop="doubao_ws.auth_mode">
+        <el-radio-group v-model="model.doubao_ws.auth_mode">
+          <el-radio-button value="api_key">新版 API Key（推荐）</el-radio-button>
+          <el-radio-button value="legacy">旧版 AppID + Token</el-radio-button>
+        </el-radio-group>
       </el-form-item>
-      <el-form-item label="访问令牌" prop="doubao_ws.access_token">
-        <el-input v-model="model.doubao_ws.access_token" placeholder="请输入访问令牌" type="password" show-password />
+      <el-form-item v-if="model.doubao_ws.auth_mode !== 'legacy'" label="API Key" prop="doubao_ws.api_key">
+        <el-input
+          v-model="model.doubao_ws.api_key"
+          placeholder="请输入新版控制台 API Key（控制台 > API Key 管理）"
+          type="password"
+          show-password
+        />
       </el-form-item>
+      <template v-else>
+        <el-form-item label="应用ID" prop="doubao_ws.appid">
+          <el-input v-model="model.doubao_ws.appid" placeholder="请输入旧版控制台应用ID（AppID）" />
+        </el-form-item>
+        <el-form-item label="访问令牌" prop="doubao_ws.access_token">
+          <el-input v-model="model.doubao_ws.access_token" placeholder="请输入旧版控制台访问令牌（Access Token）" type="password" show-password />
+        </el-form-item>
+      </template>
       <el-form-item label="模型" prop="doubao_ws.model">
         <el-select v-model="model.doubao_ws.model" placeholder="请选择模型" style="width: 100%">
           <el-option v-for="option in DOUBAO_MODEL_OPTIONS" :key="option.value" :label="option.label" :value="option.value" />
         </el-select>
       </el-form-item>
       <el-form-item label="资源 ID" prop="doubao_ws.resource_id">
-        <el-input v-model="model.doubao_ws.resource_id" placeholder="可选；如 TTS-SeedTTS2.xxxxx，优先使用控制台实例 ID" />
+        <el-input v-model="model.doubao_ws.resource_id" placeholder="可选；留空自动按模型映射（如 seed-tts-2.0 / seed-icl-2.0）" />
       </el-form-item>
       <el-form-item label="音色" prop="doubao_ws.voice">
         <el-select
           v-model="model.doubao_ws.voice"
-          placeholder="请选择音色"
+          placeholder="请选择或输入音色ID"
           style="width: 100%"
           filterable
           :loading="voiceLoading"
@@ -549,15 +565,7 @@ import { TTS_PROVIDER_OPTIONS } from './ttsProviderOptions'
 import XunfeiCommonConfig from './XunfeiCommonConfig.vue'
 import VoicePreviewButton from '@/components/common/VoicePreviewButton.vue'
 import { ALIYUN_TTS_MODEL_OPTIONS, isAliyunQwenTtsModel, resolveAliyunAPIURL, serializeAliyunTtsConfig, supportsAliyunInstruction } from './aliyunTtsOptions'
-
-const DOUBAO_MODEL_OPTIONS = [
-  { label: '豆包语音合成 1.1', value: 'seed-tts-1.1' },
-  { label: '豆包语音合成 2.0 Standard', value: 'seed-tts-2.0-standard' },
-  { label: '豆包语音合成 2.0 Expressive', value: 'seed-tts-2.0-expressive' },
-  { label: '豆包声音复刻 1.0', value: 'seed-icl-1.0' },
-  { label: '豆包声音复刻 2.0 Standard', value: 'seed-icl-2.0-standard' },
-  { label: '豆包声音复刻 2.0 Expressive', value: 'seed-icl-2.0-expressive' }
-]
+import { DOUBAO_MODEL_OPTIONS, serializeDoubaoWSConfig } from './doubaoTtsOptions'
 
 const props = defineProps({
   model: { type: Object, required: true },
@@ -604,13 +612,7 @@ function getJsonData() {
       config.instruct_text = form.cosyvoice?.instruct_text
       break
     case 'doubao_ws':
-      config.appid = form.doubao_ws?.appid
-      config.access_token = form.doubao_ws?.access_token
-      config.model = form.doubao_ws?.model || 'seed-tts-2.0-standard'
-      config.resource_id = form.doubao_ws?.resource_id
-      config.voice = form.doubao_ws?.voice
-      config.ws_url = form.doubao_ws?.ws_url || 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream'
-      break
+      return JSON.stringify(serializeDoubaoWSConfig(form.doubao_ws))
     case 'edge':
       config.voice = form.edge?.voice
       config.rate = form.edge?.rate

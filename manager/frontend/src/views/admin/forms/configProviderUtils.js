@@ -87,7 +87,9 @@ export function resolveTTSProvider(provider, configId, data = {}) {
     if (includes(url, 'bigmodel.cn') || includes(model, 'glm-tts')) return 'zhipu'
     if (includes(url, 'minimax')) return 'minimax'
     if (includes(model, 'indextts')) return 'indextts_vllm'
-    if (includes(url, 'openspeech', 'volces.com', 'volcengine')) return has(value, 'ws_url', 'ws_host', 'use_stream', 'resource_id') ? 'doubao_ws' : 'doubao'
+    if (includes(url, 'openspeech', 'volces.com', 'volcengine')) {
+      return (has(value, 'ws_url', 'ws_host', 'use_stream') || clean(url).startsWith('ws')) ? 'doubao_ws' : 'doubao'
+    }
     if (has(value, 'api_key', 'model', 'voice', 'response_format')) return 'openai'
     return ''
   }, 'doubao_ws')
