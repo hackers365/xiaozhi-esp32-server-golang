@@ -167,6 +167,8 @@ go build -o xiaozhi_server.exe ./cmd/server
 
 ### 4.2 控制台后端
 
+分离部署使用 `config.json`，AIO 使用 `manager.json`。两种模式都支持可选的 `JWT_SECRET` 和 `jwt.secret`，配置优先级及重启影响见 [JWT 密钥配置](../manager/backend/config/README.md#使用方法)。
+
 代码目录：`manager/backend`
 
 ### 关键配置

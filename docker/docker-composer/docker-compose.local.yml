@@ -73,6 +73,7 @@ services:
       - DB_USER=root
       - DB_PASSWORD=password
       - DB_NAME=xiaozhi_admin
+      - JWT_SECRET=${JWT_SECRET:-}
     volumes:
       - ../../manager/backend/config:/root/config
     networks:

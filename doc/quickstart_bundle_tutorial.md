@@ -72,6 +72,10 @@ DYLD_FRAMEWORK_PATH="$PWD/ten-vad/lib/macOS" ./xiaozhi_server
 
 ---
 
+## JWT 密钥
+
+单机无需额外配置：启动时会生成进程内随机密钥，重启后需要重新登录。需要跨重启或多实例共享登录时，请通过 `JWT_SECRET` 或 `manager.json` 的 `jwt.secret` 配置同一把至少 32 字节的独立随机密钥。若升级时沿用旧的 `manager.json`，请清空或替换旧默认密钥，否则程序会拒绝启动。
+
 ## 下一步
 
 ### 1. 访问Web控制台

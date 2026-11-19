@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -85,7 +86,7 @@ func Load() *Config {
 
 func LoadWithPath(configPath string) *Config {
 	config := LoadFromFile(configPath)
-	if secret := os.Getenv("JWT_SECRET"); secret != "" {
+	if secret := strings.TrimSpace(os.Getenv("JWT_SECRET")); secret != "" {
 		config.JWT.Secret = secret
 	}
 

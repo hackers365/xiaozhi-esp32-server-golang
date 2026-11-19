@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"crypto/rand"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -26,16 +28,28 @@ type signingConfig struct {
 
 var currentSigningConfig atomic.Pointer[signingConfig]
 
+const legacyJWTSecret = "xiaozhi_admin_secret_key"
+
 func ConfigureJWT(secret string, expireHour int) error {
 	secret = strings.TrimSpace(secret)
-	if len(secret) < 32 || secret == "xiaozhi_admin_secret_key" {
-		return errors.New("JWT secret must be a unique random value of at least 32 bytes")
+	key := []byte(secret)
+	switch {
+	case secret == "":
+		key = make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return fmt.Errorf("generate JWT signing key: %w", err)
+		}
+		log.Print("JWT_SECRET and jwt.secret are unset; using a temporary signing key. Existing sessions will not survive a restart.")
+	case secret == legacyJWTSecret:
+		return errors.New("the previous default JWT secret is not allowed; clear jwt.secret or configure a new random secret")
+	case len(key) < 32:
+		return errors.New("JWT_SECRET or jwt.secret must be a random value of at least 32 bytes")
 	}
 	if expireHour <= 0 {
 		expireHour = 24
 	}
 	currentSigningConfig.Store(&signingConfig{
-		secret: []byte(secret),
+		secret: key,
 		expiry: time.Duration(expireHour) * time.Hour,
 	})
 	return nil
@@ -69,7 +83,7 @@ func ParseToken(tokenString string) (*Claims, error) {
 	}
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		return config.secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
 
 	if err != nil {
 		return nil, err

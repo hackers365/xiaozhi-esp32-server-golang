@@ -23,7 +23,7 @@
     "database": "xiaozhi_admin" // 数据库名称
   },
   "jwt": {
-    "secret": "", // 启动前必须配置至少32字节的随机密钥，或设置JWT_SECRET环境变量
+    "secret": "", // 留空使用进程内随机密钥，也可设置 JWT_SECRET
     "expire_hour": 24           // Token过期时间(小时)
   }
 }
@@ -31,7 +31,7 @@
 
 ## 使用方法
 
-启动后端前，请生成独立 JWT 密钥并设置 `JWT_SECRET`（例如 `openssl rand -hex 32`），或写入配置文件的 `jwt.secret`。环境变量优先。重启及多实例部署应保持同一密钥；轮换密钥会使已有 JWT 失效。
+非空白的 `JWT_SECRET` 优先于 `jwt.secret`。两者均未配置时，后端生成进程内随机密钥，重启后已有 JWT 失效。需要跨重启或多实例共享登录时，请配置同一把至少 32 字节的独立随机密钥（例如 `openssl rand -hex 32`）。旧默认密钥不能再使用；升级时请移除或替换。
 
 ### 1. 命令行参数
 
@@ -69,13 +69,13 @@ start.bat help               # 显示帮助
 ### 开发环境 (config.dev.json)
 - 使用debug模式
 - 数据库名称添加_dev后缀
-- JWT密钥可以使用简单的字符串
+- JWT 密钥可留空，由进程随机生成
 - Token过期时间可以设置较长
 
 ### 生产环境 (config.prod.json)
 - 使用release模式
 - 使用独立的生产数据库
-- JWT密钥必须使用强密码
+- 显式配置的 JWT 密钥请使用至少 32 字节的独立随机值
 - Token过期时间建议设置较短
 - 数据库用户权限最小化
 
