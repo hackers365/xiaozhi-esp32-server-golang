@@ -1,14 +1,18 @@
 package doubao
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewDoubaoTTSProvider(t *testing.T) {
 	config := map[string]interface{}{
+		"api_key":      "test_api_key",
 		"appid":        "test_app_id",
 		"access_token": "test_token",
 		"model":        "seed-tts-1.1",
@@ -17,6 +21,9 @@ func TestNewDoubaoTTSProvider(t *testing.T) {
 	}
 
 	provider := NewDoubaoTTSProvider(config)
+	if provider.APIKey != "test_api_key" {
+		t.Fatalf("APIKey = %q", provider.APIKey)
+	}
 	if provider.AppID != "test_app_id" {
 		t.Fatalf("AppID = %q", provider.AppID)
 	}
@@ -76,10 +83,33 @@ func TestResolveDoubaoTTSModelSaturnVoiceDefaultsToTTS20(t *testing.T) {
 	}
 }
 
-func TestResolveDoubaoTTSModelBigTTSVoiceDefaultsToTTS20(t *testing.T) {
-	got, err := resolveDoubaoTTSModel("", "zh_female_qinqienvsheng_moon_bigtts")
+func TestResolveDoubaoTTSModelUranusAndICLUranusDefaultToTTS20(t *testing.T) {
+	cases := []string{
+		"zh_female_vv_uranus_bigtts",
+		"ICL_uranus_zh_female_xingganyujie_tob",
+		"ja_female_bv521_uranus_bigtts",
+	}
+	for _, voice := range cases {
+		got, err := resolveDoubaoTTSModel(modelSeedTTS20Standard, voice)
+		if err != nil {
+			t.Fatalf("resolveDoubaoTTSModel(%q) error = %v", voice, err)
+		}
+		if got.ResourceID != resourceSeedTTS20 {
+			t.Fatalf("voice %q ResourceID = %q, want %q", voice, got.ResourceID, resourceSeedTTS20)
+		}
+		if got.RequestModel != "" {
+			t.Fatalf("voice %q RequestModel = %q, want empty", voice, got.RequestModel)
+		}
+		if got.IsCloneVoice {
+			t.Fatalf("voice %q unexpectedly marked as clone voice", voice)
+		}
+	}
+}
+
+func TestResolveDoubaoTTSModelUpgradesLegacyTTS11ForUranusVoice(t *testing.T) {
+	got, err := resolveDoubaoTTSModel(modelSeedTTS11, "zh_female_vv_uranus_bigtts")
 	if err != nil {
-		t.Fatalf("resolveDoubaoTTSModel bigtts error = %v", err)
+		t.Fatalf("resolveDoubaoTTSModel legacy tts1.1 error = %v", err)
 	}
 	if got.ResourceID != resourceSeedTTS20 {
 		t.Fatalf("ResourceID = %q", got.ResourceID)
@@ -89,16 +119,28 @@ func TestResolveDoubaoTTSModelBigTTSVoiceDefaultsToTTS20(t *testing.T) {
 	}
 }
 
-func TestResolveDoubaoTTSModelUpgradesLegacyTTS10ForBigTTSVoice(t *testing.T) {
-	got, err := resolveDoubaoTTSModel(modelSeedTTS11, "zh_female_qinqienvsheng_moon_bigtts")
+func TestResolveDoubaoTTSModelV1BigTTSVoiceUsesTTS10(t *testing.T) {
+	for _, model := range []string{"", modelSeedTTS11, modelSeedTTS20Standard} {
+		got, err := resolveDoubaoTTSModel(model, "zh_female_qinqienvsheng_moon_bigtts")
+		if err != nil {
+			t.Fatalf("resolveDoubaoTTSModel(%q, moon_bigtts) error = %v", model, err)
+		}
+		if got.ResourceID != resourceSeedTTS10 {
+			t.Fatalf("model=%q ResourceID = %q, want %q", model, got.ResourceID, resourceSeedTTS10)
+		}
+		if got.ConfigModel != modelSeedTTS11 {
+			t.Fatalf("model=%q ConfigModel = %q, want %q", model, got.ConfigModel, modelSeedTTS11)
+		}
+	}
+}
+
+func TestParseDoubaoTTSStreamEventDoneCode(t *testing.T) {
+	event, err := parseDoubaoTTSStreamEvent([]byte(`{"code":20000000,"message":"OK","data":null}`))
 	if err != nil {
-		t.Fatalf("resolveDoubaoTTSModel legacy tts1.0 error = %v", err)
+		t.Fatalf("parseDoubaoTTSStreamEvent done code error = %v", err)
 	}
-	if got.ResourceID != resourceSeedTTS20 {
-		t.Fatalf("ResourceID = %q", got.ResourceID)
-	}
-	if got.ConfigModel != modelSeedTTS20Standard {
-		t.Fatalf("ConfigModel = %q", got.ConfigModel)
+	if event == nil || event.Code != doubaoTTSStreamDoneCode {
+		t.Fatalf("event = %#v, want code %d", event, doubaoTTSStreamDoneCode)
 	}
 }
 
@@ -157,7 +199,7 @@ func TestSummarizeDoubaoWSAttemptErrorExplicitUnauthorizedThenMismatch(t *testin
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), "显式 resource_id 对该 app/token 未授权") {
+	if !strings.Contains(err.Error(), "显式 resource_id 对当前凭据") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
@@ -194,5 +236,69 @@ func TestNewDoubaoTTSV3RequestUsesNestedReqParams(t *testing.T) {
 	}
 	if audioParams["format"] != defaultDoubaoAudioFmt {
 		t.Fatalf("audio_params.format = %#v", audioParams["format"])
+	}
+}
+
+func TestLiveDoubaoTTSWithAPIKey(t *testing.T) {
+	apiKey := strings.TrimSpace(os.Getenv("DOUBAO_LIVE_API_KEY"))
+	if apiKey == "" {
+		t.Skip("set DOUBAO_LIVE_API_KEY to run live Doubao TTS verification")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	wsCases := []struct {
+		name  string
+		model string
+		voice string
+	}{
+		{name: "ws_2.0_uranus", model: modelSeedTTS20Standard, voice: "zh_female_vv_uranus_bigtts"},
+		{name: "ws_2.0_icl_uranus", model: modelSeedTTS20Standard, voice: "ICL_uranus_zh_female_xingganyujie_tob"},
+		{name: "ws_1.1_mars", model: modelSeedTTS11, voice: "zh_female_cancan_mars_bigtts"},
+	}
+	for _, tc := range wsCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewDoubaoWSProvider(map[string]interface{}{
+				"api_key": apiKey,
+				"model":   tc.model,
+				"voice":   tc.voice,
+			})
+			frames, err := p.TextToSpeech(ctx, "你好，测试豆包语音合成。", 24000, 1, 60)
+			if err != nil {
+				t.Fatalf("WS TextToSpeech failed: %v", err)
+			}
+			if len(frames) == 0 {
+				t.Fatal("WS TextToSpeech returned 0 opus frames")
+			}
+			t.Logf("%s: received %d opus frames", tc.name, len(frames))
+		})
+	}
+
+	httpCases := []struct {
+		name  string
+		model string
+		voice string
+	}{
+		{name: "http_2.0_uranus", model: modelSeedTTS20Standard, voice: "zh_female_vv_uranus_bigtts"},
+		{name: "http_2.0_icl_uranus", model: modelSeedTTS20Standard, voice: "ICL_uranus_zh_female_xingganyujie_tob"},
+		{name: "http_1.1_mars", model: modelSeedTTS11, voice: "zh_female_cancan_mars_bigtts"},
+	}
+	for _, tc := range httpCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewDoubaoTTSProvider(map[string]interface{}{
+				"api_key": apiKey,
+				"model":   tc.model,
+				"voice":   tc.voice,
+			})
+			frames, err := p.TextToSpeech(ctx, "你好，测试豆包语音合成。", 24000, 1, 60)
+			if err != nil {
+				t.Fatalf("HTTP TextToSpeech failed: %v", err)
+			}
+			if len(frames) == 0 {
+				t.Fatal("HTTP TextToSpeech returned 0 opus frames")
+			}
+			t.Logf("%s: received %d opus frames", tc.name, len(frames))
+		})
 	}
 }

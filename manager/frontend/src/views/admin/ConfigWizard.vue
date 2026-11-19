@@ -168,6 +168,7 @@ import { resolveASRProvider, resolveTTSProvider, resolveVADProvider } from './fo
 import { getProviderFixedType, resolveLLMProvider } from './forms/llmCatalog'
 import { TTS_PROVIDERS_WITH_VOICES } from './forms/ttsProviderOptions'
 import { normalizeAliyunTtsConfig, reconcileAliyunVoice } from './forms/aliyunTtsOptions'
+import { createDefaultDoubaoWSConfig, normalizeDoubaoWSConfig, reconcileDoubaoVoice } from './forms/doubaoTtsOptions'
 
 const currentStep = ref(0)
 const saving = ref(false)
@@ -443,14 +444,7 @@ const ttsForm = reactive({
     stream: true,
     frame_duration: 60
   },
-  doubao_ws: {
-    appid: '',
-    access_token: '',
-    model: 'seed-tts-2.0-standard',
-    resource_id: '',
-    voice: '',
-    ws_url: 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream'
-  },
+  doubao_ws: createDefaultDoubaoWSConfig(),
   edge: {
     voice: 'zh-CN-XiaoxiaoNeural',
     rate: '+0%',
@@ -550,6 +544,7 @@ const ttsFormRules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
   config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
   provider: [{ required: true, message: '请选择提供商', trigger: 'change' }],
+  'doubao_ws.api_key': [{ required: true, message: '请输入API Key', trigger: 'blur' }],
   'doubao_ws.appid': [{ required: true, message: '请输入应用ID', trigger: 'blur' }],
   'doubao_ws.access_token': [{ required: true, message: '请输入访问令牌', trigger: 'blur' }],
   'doubao_ws.model': [{ required: true, message: '请选择模型', trigger: 'change' }],
@@ -986,13 +981,7 @@ async function loadTtsIfExists() {
     const p = resolveTTSProvider(config.provider, config.config_id, data)
     ttsForm.provider = p
     if (p === 'doubao_ws') {
-      Object.assign(ttsForm.doubao_ws, data)
-      if (!String(ttsForm.doubao_ws.ws_url || '').trim()) {
-        ttsForm.doubao_ws.ws_url = data.ws_host ? `wss://${data.ws_host}/api/v3/tts/unidirectional/stream` : 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream'
-      }
-      if (!String(ttsForm.doubao_ws.resource_id || '').trim()) {
-        ttsForm.doubao_ws.resource_id = data.resource_id || ''
-      }
+      Object.assign(ttsForm.doubao_ws, normalizeDoubaoWSConfig(data))
     } else if (p === 'edge') Object.assign(ttsForm.edge, data)
     else if (p === 'edge_offline') Object.assign(ttsForm.edge_offline, data)
     else if (p === 'aliyun_qwen') Object.assign(ttsForm.qwen_tts, normalizeAliyunTtsConfig(data))
@@ -1304,6 +1293,12 @@ async function loadTtsVoiceOptions(provider) {
         params.model = model
       }
     }
+    if (provider === 'doubao_ws') {
+      const model = String(ttsForm.doubao_ws?.model || '').trim()
+      if (model) {
+        params.model = model
+      }
+    }
     const previousOptions = voiceOptions.value
     const response = await api.get('/user/voice-options', { params })
     if (requestId !== voiceRequestId || currentStep.value !== 4) return
@@ -1311,6 +1306,9 @@ async function loadTtsVoiceOptions(provider) {
     voiceOptions.value = nextOptions
     if (provider === 'aliyun_qwen') {
       ttsForm.qwen_tts.voice = reconcileAliyunVoice(previousOptions, nextOptions, ttsForm.qwen_tts.voice)
+    }
+    if (provider === 'doubao_ws') {
+      ttsForm.doubao_ws.voice = reconcileDoubaoVoice(previousOptions, nextOptions, ttsForm.doubao_ws.voice)
     }
   } catch (error) {
     if (requestId !== voiceRequestId || currentStep.value !== 4) return
@@ -1345,6 +1343,12 @@ watch(() => ttsForm.provider, (provider) => {
 watch(() => ttsForm.qwen_tts.model, (newModel) => {
   if (currentStep.value === 4 && ttsForm.provider === 'aliyun_qwen') {
     loadTtsVoiceOptions('aliyun_qwen')
+  }
+})
+
+watch(() => ttsForm.doubao_ws.model, () => {
+  if (currentStep.value === 4 && ttsForm.provider === 'doubao_ws') {
+    loadTtsVoiceOptions('doubao_ws')
   }
 })
 

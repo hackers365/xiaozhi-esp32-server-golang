@@ -27,7 +27,16 @@ var wsDialer = websocket.Dialer{
 
 var doubaoWSRequestHeader = []byte{0x11, 0x10, 0x11, 0x00}
 
+const (
+	doubaoWSEventSessionFinished  int32 = 152
+	doubaoWSEventSessionFailed    int32 = 153
+	doubaoWSEventTTSSentenceStart int32 = 350
+	doubaoWSEventTTSSentenceEnd   int32 = 351
+	doubaoWSEventTTSSubtitle      int32 = 364
+)
+
 type DoubaoWSProvider struct {
+	APIKey      string
 	AppID       string
 	AccessToken string
 	Model       string
@@ -42,6 +51,7 @@ type doubaoWSAttemptResult struct {
 }
 
 func NewDoubaoWSProvider(config map[string]interface{}) *DoubaoWSProvider {
+	apiKey, _ := config["api_key"].(string)
 	appID, _ := config["appid"].(string)
 	accessToken, _ := config["access_token"].(string)
 	model, _ := config["model"].(string)
@@ -60,6 +70,7 @@ func NewDoubaoWSProvider(config map[string]interface{}) *DoubaoWSProvider {
 		}
 	}
 	return &DoubaoWSProvider{
+		APIKey:      strings.TrimSpace(apiKey),
 		AppID:       appID,
 		AccessToken: accessToken,
 		Model:       normalizeDoubaoModel(model),
@@ -140,7 +151,7 @@ func (p *DoubaoWSProvider) textToSpeechStreamWithModel(ctx context.Context, text
 		return nil, fmt.Errorf("构建豆包 WebSocket TTS 请求失败: %w", err)
 	}
 
-	headers := doubaoapi.NewTTSWebsocketHeaders(p.AppID, p.AccessToken, resolved.ResourceID, doubaoapi.NewConnectID())
+	headers := doubaoapi.NewTTSWebsocketHeadersWithAuth(p.APIKey, p.AppID, p.AccessToken, resolved.ResourceID, doubaoapi.NewConnectID())
 	conn, resp, err := wsDialer.DialContext(ctx, p.WSURL, headers)
 	if err != nil {
 		return nil, formatDoubaoWSConnectError(err, resp)
@@ -305,7 +316,7 @@ func parseDoubaoWSMessage(messageType int, payload []byte) ([]byte, bool, error)
 		if err != nil {
 			return nil, false, err
 		}
-		return chunk, event.Sequence < 0, nil
+		return chunk, event.Code == doubaoTTSStreamDoneCode || event.Sequence < 0, nil
 	}
 
 	return parseDoubaoWSBinaryResponse(payload)
@@ -376,7 +387,7 @@ func parseDoubaoWSBinaryResponse(frame []byte) ([]byte, bool, error) {
 		if err != nil {
 			return nil, false, err
 		}
-		return chunk, event.Sequence < 0, nil
+		return chunk, event.Code == doubaoTTSStreamDoneCode || event.Sequence < 0, nil
 	case 0x0f:
 		if len(payload) < 8 {
 			return nil, false, fmt.Errorf("解析豆包 WebSocket 错误帧失败: payload 长度不足")
@@ -410,8 +421,29 @@ func parseDoubaoWSFullServerResponse(payload []byte, compression byte, flags byt
 		if err != nil {
 			return nil, false, err
 		}
+		if compression == 1 && len(body) > 0 {
+			body, err = gzipDecompressDoubao(body)
+			if err != nil {
+				return nil, false, fmt.Errorf("解压豆包 WebSocket flags=4 ACK 帧失败: %w", err)
+			}
+		}
 		trimmed := bytes.TrimSpace(body)
+		if marker == doubaoWSEventSessionFinished {
+			log.Debugf("豆包 WebSocket ACK(request_id=%s) 会话结束: marker=%d body=%s", requestID, marker, string(trimmed))
+			return nil, true, nil
+		}
+		if marker == doubaoWSEventSessionFailed {
+			msg := strings.TrimSpace(string(trimmed))
+			if msg == "" {
+				msg = fmt.Sprintf("豆包 WebSocket TTS 会话失败(event=%d)", marker)
+			}
+			return nil, false, fmt.Errorf("%s", msg)
+		}
 		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}")) {
+			if marker == doubaoWSEventTTSSentenceStart || marker == doubaoWSEventTTSSentenceEnd || marker == doubaoWSEventTTSSubtitle {
+				log.Debugf("豆包 WebSocket ACK(request_id=%s) 空事件元数据: marker=%d", requestID, marker)
+				return nil, false, nil
+			}
 			log.Debugf("豆包 WebSocket ACK(request_id=%s) 结束标记: marker=%d body=%q", requestID, marker, string(trimmed))
 			return nil, true, nil
 		}
@@ -422,7 +454,7 @@ func parseDoubaoWSFullServerResponse(payload []byte, compression byte, flags byt
 
 		var event doubaoTTSV3Event
 		if err := json.Unmarshal(trimmed, &event); err == nil && (event.Code != 0 || event.Message != "" || event.Data != nil) {
-			if event.Code != 0 {
+			if event.Code != 0 && event.Code != doubaoTTSStreamDoneCode {
 				msg := strings.TrimSpace(event.Message)
 				if msg == "" {
 					msg = fmt.Sprintf("豆包 WebSocket TTS 返回错误码 %d", event.Code)
@@ -433,7 +465,7 @@ func parseDoubaoWSFullServerResponse(payload []byte, compression byte, flags byt
 			if err != nil {
 				return nil, false, err
 			}
-			return chunk, event.Sequence < 0, nil
+			return chunk, event.Code == doubaoTTSStreamDoneCode || event.Sequence < 0, nil
 		}
 
 		log.Debugf("豆包 WebSocket ACK(request_id=%s) 元数据: marker=%d body=%s", requestID, marker, string(trimmed))
@@ -607,7 +639,7 @@ func summarizeDoubaoWSAttemptError(voice string, preferred resolvedTTSModel, att
 
 	if hasNotGranted && hasMismatch {
 		return fmt.Errorf(
-			"豆包 WebSocket TTS 配置不可用: voice=%s, model=%s, resource_id=%s%s。当前显式 resource_id 对该 app/token 未授权，回退到模型关联的通用 resource 后仍提示音色与资源不匹配。请以火山控制台中当前 AccessKey 实际开通的音色/ResourceID 对应关系为准",
+			"豆包 WebSocket TTS 配置不可用: voice=%s, model=%s, resource_id=%s%s。当前显式 resource_id 对当前凭据（API Key 或 AppID/AccessToken）未授权，回退到模型关联的通用 resource 后仍提示音色与资源不匹配。请以火山控制台中实际开通的音色/ResourceID 对应关系为准",
 			voice,
 			preferred.ConfigModel,
 			preferred.ResourceID,
@@ -616,7 +648,7 @@ func summarizeDoubaoWSAttemptError(voice string, preferred resolvedTTSModel, att
 	}
 	if hasNotGranted {
 		return fmt.Errorf(
-			"豆包 WebSocket TTS resource_id 未授权: voice=%s, model=%s, resource_id=%s%s。当前 app/token 无权访问该 ResourceID，请改用当前 AccessKey 实际授权的 ResourceID，或清空 resource_id 走模型默认映射",
+			"豆包 WebSocket TTS resource_id 未授权: voice=%s, model=%s, resource_id=%s%s。当前凭据（API Key 或 AppID/AccessToken）无权访问该 ResourceID，请确认火山控制台已开通对应服务，或清空 resource_id 走模型默认映射",
 			voice,
 			preferred.ConfigModel,
 			preferred.ResourceID,
@@ -627,7 +659,7 @@ func summarizeDoubaoWSAttemptError(voice string, preferred resolvedTTSModel, att
 		return lastErr
 	}
 
-	hint := "所选音色与当前 app/token 可访问的 v3 ResourceID 不匹配。旧版 v1 音色列表不会自动无缝迁移到 v3。"
+	hint := "所选音色与当前凭据可访问的 v3 ResourceID 不匹配。旧版 v1 音色列表不会自动无缝迁移到 v3。"
 	switch strings.ToLower(strings.TrimSpace(voice)) {
 	case "zh_female_wanwanxiaohe_moon_bigtts", "zh_female_qinqienvsheng_moon_bigtts":
 		hint = "所选音色来自旧版静态列表，升级到 v3 后通常需要重新换成你账号下实际开通的音色，旧数据不会自动无缝迁移。"

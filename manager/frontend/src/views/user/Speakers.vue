@@ -1005,10 +1005,11 @@ const extractVoiceOptions = (provider, config) => {
         options.push({ label: config.voice, value: config.voice })
       }
       const doubaoVoices = [
-        { label: '双快思思 (甜美女声)', value: 'zh_female_shuangkuaisisi_moon_bigtts' },
-        { label: 'BV700 V2 (男声)', value: 'BV700_V2_streaming' },
-        { label: 'BV001 (女声)', value: 'BV001_streaming' },
-        { label: 'BV002 (男声)', value: 'BV002_streaming' }
+        { label: 'Vivi 2.0（通用场景）', value: 'zh_female_vv_uranus_bigtts' },
+        { label: '小何 2.0（通用场景）', value: 'zh_female_xiaohe_uranus_bigtts' },
+        { label: '云舟 2.0（通用场景）', value: 'zh_male_m191_uranus_bigtts' },
+        { label: '小天 2.0（通用场景）', value: 'zh_male_taocheng_uranus_bigtts' },
+        { label: '团子 2.0（通用场景）', value: 'zh_female_tuanzi_uranus_bigtts' }
       ]
       doubaoVoices.forEach(v => {
         if (!options.find(o => o.value === v.value)) {

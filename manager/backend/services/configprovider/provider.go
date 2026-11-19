@@ -297,7 +297,7 @@ func inferTTSProvider(data map[string]interface{}) string {
 	case containsAny(model, "indextts"):
 		return "indextts_vllm"
 	case containsAny(apiURL, "openspeech", "volces.com", "volcengine"):
-		if hasAny(data, "ws_url", "ws_host", "use_stream", "resource_id") {
+		if hasAny(data, "ws_url", "ws_host", "use_stream") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(apiURL)), "ws") {
 			return "doubao_ws"
 		}
 		return "doubao"

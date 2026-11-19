@@ -121,6 +121,7 @@ import TTSConfigForm from './forms/TTSConfigForm.vue'
 import { TTS_PROVIDERS_WITH_VOICES } from './forms/ttsProviderOptions'
 import { resolveTTSProvider } from './forms/configProviderUtils'
 import { normalizeAliyunTtsConfig, reconcileAliyunVoice } from './forms/aliyunTtsOptions'
+import { createDefaultDoubaoWSConfig, normalizeDoubaoWSConfig, reconcileDoubaoVoice } from './forms/doubaoTtsOptions'
 
 const configs = ref([])
 const testingId = ref(null)
@@ -174,20 +175,14 @@ const form = reactive({
     frame_duration: 60
   },
   doubao: {
-    appid: '6886011847',
-    access_token: 'access_token',
+    api_key: '',
+    appid: '',
+    access_token: '',
     model: 'seed-tts-2.0-standard',
-    voice: 'BV001_streaming',
+    voice: 'zh_female_vv_uranus_bigtts',
     api_url: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
   },
-  doubao_ws: {
-    appid: '6886011847',
-    access_token: 'access_token',
-    model: 'seed-tts-2.0-standard',
-    resource_id: '',
-    voice: '',
-    ws_url: 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream'
-  },
+  doubao_ws: createDefaultDoubaoWSConfig(),
   edge: {
     voice: 'zh-CN-XiaoxiaoNeural',
     rate: '+0%',
@@ -301,6 +296,7 @@ const rules = {
   'doubao.voice': [{ required: true, message: '请输入音色', trigger: 'blur' }],
   'doubao.api_url': [{ required: true, message: '请输入API URL', trigger: 'blur' }],
   // 豆包 WebSocket 验证规则
+  'doubao_ws.api_key': [{ required: true, message: '请输入API Key', trigger: 'blur' }],
   'doubao_ws.appid': [{ required: true, message: '请输入应用ID', trigger: 'blur' }],
   'doubao_ws.access_token': [{ required: true, message: '请输入访问令牌', trigger: 'blur' }],
   'doubao_ws.model': [{ required: true, message: '请选择模型', trigger: 'change' }],
@@ -379,6 +375,7 @@ const editConfig = (config) => {
         form.cosyvoice.instruct_text = configData.instruct_text || ''
         break
       case 'doubao':
+        form.doubao.api_key = configData.api_key || ''
         form.doubao.appid = configData.appid || ''
         form.doubao.access_token = configData.access_token || ''
         form.doubao.model = configData.model || 'seed-tts-2.0-standard'
@@ -386,12 +383,7 @@ const editConfig = (config) => {
         form.doubao.api_url = configData.api_url || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
         break
       case 'doubao_ws':
-        form.doubao_ws.appid = configData.appid || ''
-        form.doubao_ws.access_token = configData.access_token || ''
-        form.doubao_ws.model = configData.model || 'seed-tts-2.0-standard'
-        form.doubao_ws.resource_id = configData.resource_id || ''
-        form.doubao_ws.voice = configData.voice || ''
-        form.doubao_ws.ws_url = configData.ws_url || (configData.ws_host ? `wss://${configData.ws_host}/api/v3/tts/unidirectional/stream` : 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream')
+        Object.assign(form.doubao_ws, normalizeDoubaoWSConfig(configData))
         break
       case 'edge':
         form.edge.voice = configData.voice || ''
@@ -740,20 +732,14 @@ const resetForm = () => {
       frame_duration: 60
     },
     doubao: {
-      appid: '6886011847',
-      access_token: 'access_token',
+      api_key: '',
+      appid: '',
+      access_token: '',
       model: 'seed-tts-2.0-standard',
-      voice: 'BV001_streaming',
+      voice: 'zh_female_vv_uranus_bigtts',
       api_url: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
     },
-    doubao_ws: {
-      appid: '6886011847',
-      access_token: 'access_token',
-      model: 'seed-tts-2.0-standard',
-      resource_id: '',
-      voice: '',
-      ws_url: 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream'
-    },
+    doubao_ws: createDefaultDoubaoWSConfig(),
     edge: {
       voice: 'zh-CN-XiaoxiaoNeural',
       rate: '+0%',
@@ -899,6 +885,12 @@ const loadVoiceOptions = async (provider, options = {}) => {
         params.model = model
       }
     }
+    if (provider === 'doubao_ws' || provider === 'doubao') {
+      const model = String(form[provider]?.model || '').trim()
+      if (model) {
+        params.model = model
+      }
+    }
     if (provider === 'indextts_vllm') {
       const apiURL = String(form.indextts_vllm?.api_url || '').trim()
       const apiKey = String(form.indextts_vllm?.api_key || '').trim()
@@ -918,6 +910,9 @@ const loadVoiceOptions = async (provider, options = {}) => {
     voiceOptions.value = nextOptions
     if (provider === 'aliyun_qwen') {
       form.qwen_tts.voice = reconcileAliyunVoice(previousOptions, nextOptions, form.qwen_tts.voice)
+    }
+    if (provider === 'doubao_ws') {
+      form.doubao_ws.voice = reconcileDoubaoVoice(previousOptions, nextOptions, form.doubao_ws.voice)
     }
   } catch (error) {
     if (requestId !== voiceRequestId || !showDialog.value) return
@@ -943,6 +938,12 @@ watch(() => form.provider, (newProvider) => {
 watch(() => form.qwen_tts.model, (newModel) => {
   if (showDialog.value && form.provider === 'aliyun_qwen') {
     loadVoiceOptions('aliyun_qwen')
+  }
+})
+
+watch(() => form.doubao_ws.model, () => {
+  if (showDialog.value && form.provider === 'doubao_ws') {
+    loadVoiceOptions('doubao_ws')
   }
 })
 

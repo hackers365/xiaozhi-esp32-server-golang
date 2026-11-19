@@ -22,6 +22,7 @@ const (
 	defaultDoubaoCloneUploadEndpoint = "https://openspeech.bytedance.com/api/v1/mega_tts/audio/upload"
 	defaultDoubaoCloneStatusEndpoint = "https://openspeech.bytedance.com/api/v1/mega_tts/status"
 	defaultDoubaoPreviewEndpoint     = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
+	doubaoPreviewStreamDoneCode      = 20000000
 )
 
 type doubaoCloneBaseResp struct {
@@ -73,9 +74,13 @@ func (vcc *VoiceCloneController) cloneWithDoubao(ctx context.Context, ttsCfg mod
 		}
 	}
 
+	apiKey := strings.TrimSpace(getStringAny(cfgMap, "api_key"))
 	appID := strings.TrimSpace(getStringAny(cfgMap, "appid"))
 	accessToken := strings.TrimSpace(getStringAny(cfgMap, "access_token"))
 	if appID == "" || accessToken == "" {
+		if apiKey != "" {
+			return nil, fmt.Errorf("豆包声音复刻上传目前需使用旧版 AppID 和 Access Token（新版 API Key 暂仅支持语音合成与试听）")
+		}
 		return nil, fmt.Errorf("豆包复刻缺少 appid 或 access_token")
 	}
 	modelType, targetModel := resolveDoubaoCloneTargetModel(getStringAny(cfgMap, "model"))
@@ -243,12 +248,17 @@ func (vcc *VoiceCloneController) fetchDoubaoCloneStatus(ctx context.Context, sta
 }
 
 func (vcc *VoiceCloneController) previewDoubaoClonedVoice(ctx context.Context, cfgMap map[string]any, voiceID, text string) ([]byte, string, error) {
+	apiKey := strings.TrimSpace(getStringAny(cfgMap, "api_key"))
 	appID := strings.TrimSpace(getStringAny(cfgMap, "appid"))
 	accessToken := strings.TrimSpace(getStringAny(cfgMap, "access_token"))
-	if appID == "" || accessToken == "" {
-		return nil, "", fmt.Errorf("豆包TTS缺少 appid 或 access_token")
+	if apiKey == "" && (appID == "" || accessToken == "") {
+		return nil, "", fmt.Errorf("豆包TTS缺少 api_key 或 appid/access_token")
 	}
 	selection := resolveDoubaoModelSelection(getStringAny(cfgMap, "model"), voiceID)
+	resourceID := strings.TrimSpace(getStringAny(cfgMap, "resource_id"))
+	if resourceID == "" {
+		resourceID = selection.ResourceID
+	}
 	endpoint := strings.TrimSpace(getStringAny(cfgMap, "api_url"))
 	if endpoint == "" {
 		endpoint = defaultDoubaoPreviewEndpoint
@@ -270,10 +280,15 @@ func (vcc *VoiceCloneController) previewDoubaoClonedVoice(ctx context.Context, c
 	if err != nil {
 		return nil, "", fmt.Errorf("创建豆包试听请求失败: %w", err)
 	}
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer;%s", accessToken))
-	req.Header.Set("X-Api-App-Id", appID)
-	req.Header.Set("X-Api-Access-Key", accessToken)
-	req.Header.Set("X-Api-Resource-Id", selection.ResourceID)
+	if apiKey != "" {
+		req.Header.Set("X-Api-Key", apiKey)
+	} else {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer;%s", accessToken))
+		req.Header.Set("X-Api-App-Id", appID)
+		req.Header.Set("X-Api-Access-Key", accessToken)
+	}
+	req.Header.Set("X-Api-Resource-Id", resourceID)
+	req.Header.Set("X-Api-Request-Id", randomDigits(16))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
@@ -303,6 +318,9 @@ func (vcc *VoiceCloneController) previewDoubaoClonedVoice(ctx context.Context, c
 				var event doubaoPreviewEvent
 				if unmarshalErr := json.Unmarshal([]byte(line), &event); unmarshalErr != nil {
 					return nil, "", fmt.Errorf("解析豆包试听事件失败: %w", unmarshalErr)
+				}
+				if event.Code == doubaoPreviewStreamDoneCode {
+					break
 				}
 				if event.Code != 0 {
 					return nil, "", fmt.Errorf("豆包试听失败(code=%d,msg=%s)", event.Code, event.Message)

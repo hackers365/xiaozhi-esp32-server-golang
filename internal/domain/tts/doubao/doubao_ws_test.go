@@ -9,6 +9,7 @@ import (
 
 func TestNewDoubaoWSProvider(t *testing.T) {
 	config := map[string]interface{}{
+		"api_key":      "test-api-key",
 		"appid":        "appid",
 		"access_token": "access_token",
 		"model":        "seed-tts-1.1",
@@ -17,6 +18,9 @@ func TestNewDoubaoWSProvider(t *testing.T) {
 	}
 
 	provider := NewDoubaoWSProvider(config)
+	if provider.APIKey != "test-api-key" {
+		t.Fatalf("APIKey = %q", provider.APIKey)
+	}
 	if provider.AppID != "appid" {
 		t.Fatalf("AppID = %q", provider.AppID)
 	}
@@ -192,6 +196,59 @@ func TestParseDoubaoWSFullServerResponseFinalMarker(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("audio = %v", got)
+	}
+}
+
+func TestParseDoubaoWSFullServerResponseSessionFinishedWithUsage(t *testing.T) {
+	requestID := []byte("request-id-123")
+	body := []byte(`{"usage":{"text_words":5}}`)
+	frame := []byte{0x11, 0x94, 0x10, 0x00}
+	payload := make([]byte, 0, 12+len(requestID)+len(body))
+	first := make([]byte, 4)
+	second := make([]byte, 4)
+	third := make([]byte, 4)
+	binary.BigEndian.PutUint32(first, uint32(doubaoWSEventSessionFinished))
+	binary.BigEndian.PutUint32(second, uint32(len(requestID)))
+	binary.BigEndian.PutUint32(third, uint32(len(body)))
+	payload = append(payload, first...)
+	payload = append(payload, second...)
+	payload = append(payload, requestID...)
+	payload = append(payload, third...)
+	payload = append(payload, body...)
+	frame = append(frame, payload...)
+
+	got, isLast, err := parseDoubaoWSMessage(2, frame)
+	if err != nil {
+		t.Fatalf("parseDoubaoWSMessage error = %v", err)
+	}
+	if !isLast {
+		t.Fatal("expected SessionFinished with usage payload to mark final frame")
+	}
+	if len(got) != 0 {
+		t.Fatalf("audio = %v", got)
+	}
+}
+
+func TestParseDoubaoWSFullServerResponseSessionFailed(t *testing.T) {
+	requestID := []byte("request-id-123")
+	body := []byte(`{"error":"session failed"}`)
+	frame := []byte{0x11, 0x94, 0x10, 0x00}
+	payload := make([]byte, 0, 12+len(requestID)+len(body))
+	first := make([]byte, 4)
+	second := make([]byte, 4)
+	third := make([]byte, 4)
+	binary.BigEndian.PutUint32(first, uint32(doubaoWSEventSessionFailed))
+	binary.BigEndian.PutUint32(second, uint32(len(requestID)))
+	binary.BigEndian.PutUint32(third, uint32(len(body)))
+	payload = append(payload, first...)
+	payload = append(payload, second...)
+	payload = append(payload, requestID...)
+	payload = append(payload, third...)
+	payload = append(payload, body...)
+	frame = append(frame, payload...)
+
+	if _, _, err := parseDoubaoWSMessage(2, frame); err == nil {
+		t.Fatal("expected SessionFailed event to return error")
 	}
 }
 
