@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -85,6 +86,9 @@ func Load() *Config {
 
 func LoadWithPath(configPath string) *Config {
 	config := LoadFromFile(configPath)
+	if secret := strings.TrimSpace(os.Getenv("JWT_SECRET")); secret != "" {
+		config.JWT.Secret = secret
+	}
 
 	// 仅当使用 MySQL 时，确保有 MySQL 配置并应用环境变量覆盖
 	if config.Database.GetStorageType() == "mysql" {

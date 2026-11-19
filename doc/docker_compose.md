@@ -143,6 +143,8 @@ xiaozhi-esp32-server-golang/
 - 主程序配置文件通过卷挂载 `../../config:/workspace/config` 导入
 - 后端配置文件通过卷挂载 `../../manager/backend/config:/root/config` 导入
 
+Manager 未配置密钥时会生成进程内随机密钥，容器重启后需要重新登录。若需跨重启或多副本共享登录，请在 Compose 的 `.env` 中设置 `JWT_SECRET`，或在挂载的后端配置中设置 `jwt.secret`。显式密钥至少 32 字节，应独立随机生成（例如 `openssl rand -hex 32`）。升级时请清空或替换旧默认密钥。
+
 ### 3. 启动服务
 
 **必须先进入 `docker/docker-composer/` 目录执行命令：**

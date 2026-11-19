@@ -37,8 +37,7 @@ func StartManagerHTTP(configPath string) {
 
 	cfg := mbconfig.LoadWithPath(configPath)
 	if err := middleware.ConfigureJWT(cfg.JWT.Secret, cfg.JWT.ExpireHour); err != nil {
-		log.Errorf("manager JWT 配置无效: %v", err)
-		return
+		log.Fatalf("manager JWT 配置无效: %v", err)
 	}
 	port := cfg.Server.Port
 	if port == "" {

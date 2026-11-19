@@ -70,6 +70,7 @@ services:
       - DB_NAME=xiaozhi_admin
       - AUDIO_BASE_PATH=/data/chat_history/audio
       - SPEAKER_SERVICE_URL=http://voice-server:8080
+      - JWT_SECRET=${JWT_SECRET:-}
     volumes:
       - ../../manager/backend/config:/root/config
       - backend_audio_data:/data/chat_history/audio
