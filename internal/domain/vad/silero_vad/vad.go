@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"xiaozhi-esp32-server-golang/internal/domain/vad/hysteresis"
 	. "xiaozhi-esp32-server-golang/internal/domain/vad/inter"
 	log "xiaozhi-esp32-server-golang/logger"
 
@@ -17,6 +18,7 @@ import (
 
 var defaultVADConfig = map[string]interface{}{
 	"threshold":               0.5,
+	"threshold_low":           0.5,
 	"min_silence_duration_ms": 100,
 	"sample_rate":             16000,
 	"channels":                1,
@@ -56,6 +58,7 @@ type SileroVAD struct {
 	stream     *speech.Stream
 
 	vadThreshold     float32
+	vadThresholdLow  float32
 	silenceThreshold int
 	speechPadMs      int
 	sampleRate       int
@@ -63,6 +66,7 @@ type SileroVAD struct {
 
 	pending   []float32
 	lastVoice bool
+	detector  *hysteresis.Detector
 	closed    bool
 	mu        sync.Mutex
 }
@@ -80,6 +84,7 @@ func NewSileroVAD(config map[string]interface{}) (*SileroVAD, error) {
 	modelPath = resolvedModelPath
 
 	threshold := getFloat32(cfg, "threshold", 0.5)
+	thresholdLow := getFloat32(cfg, "threshold_low", threshold)
 	silenceMs := getDurationMs(cfg, "min_silence_duration_ms", "min_silence_duration", 100)
 	sampleRate := getInt(cfg, "sample_rate", 16000)
 	channels := getInt(cfg, "channels", 1)
@@ -126,10 +131,12 @@ func NewSileroVAD(config map[string]interface{}) (*SileroVAD, error) {
 		runtimeKey:       key,
 		stream:           stream,
 		vadThreshold:     threshold,
+		vadThresholdLow:  thresholdLow,
 		silenceThreshold: silenceMs,
 		speechPadMs:      speechPadMs,
 		sampleRate:       sampleRate,
 		channels:         channels,
+		detector:         hysteresis.NewDetector(threshold, thresholdLow),
 	}, nil
 }
 
@@ -143,6 +150,9 @@ func (s *SileroVAD) IsVADExt(pcmData []float32, sampleRate int, frameSize int) (
 
 	if s.closed || s.stream == nil || s.runtime == nil {
 		return false, errors.New("Silero VAD实例未初始化")
+	}
+	if s.detector == nil {
+		s.detector = hysteresis.NewDetector(s.vadThreshold, s.vadThresholdLow)
 	}
 	if len(pcmData) == 0 {
 		return false, nil
@@ -164,7 +174,8 @@ func (s *SileroVAD) IsVADExt(pcmData []float32, sampleRate int, frameSize int) (
 	s.pending = append(s.pending, pcm...)
 	windowSize := sileroWindowSize(s.sampleRate)
 	processed := 0
-	haveVoice := false
+	haveVoice := s.lastVoice
+	chunkHasVoice := false
 	didInfer := false
 
 	for processed+windowSize <= len(s.pending) {
@@ -173,8 +184,9 @@ func (s *SileroVAD) IsVADExt(pcmData []float32, sampleRate int, frameSize int) (
 			return false, err
 		}
 		didInfer = true
-		if probability >= s.vadThreshold {
-			haveVoice = true
+		haveVoice = s.detector.Evaluate(probability)
+		if haveVoice {
+			chunkHasVoice = true
 		}
 		processed += windowSize
 	}
@@ -185,7 +197,7 @@ func (s *SileroVAD) IsVADExt(pcmData []float32, sampleRate int, frameSize int) (
 	}
 	if didInfer {
 		s.lastVoice = haveVoice
-		return haveVoice, nil
+		return chunkHasVoice, nil
 	}
 	return s.lastVoice, nil
 }
@@ -231,6 +243,9 @@ func (s *SileroVAD) Reset() error {
 	}
 	s.pending = nil
 	s.lastVoice = false
+	if s.detector != nil {
+		s.detector.Reset()
+	}
 	return s.stream.Reset()
 }
 
@@ -238,6 +253,7 @@ func (s *SileroVAD) SetThreshold(threshold float32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.vadThreshold = threshold
+	s.detector = hysteresis.NewDetector(s.vadThreshold, s.vadThresholdLow)
 	if s.stream != nil {
 		s.stream.SetThreshold(threshold)
 	}
@@ -257,6 +273,9 @@ func (s *SileroVAD) resetStreamLocked(sampleRate int) error {
 	s.sampleRate = sampleRate
 	s.pending = nil
 	s.lastVoice = false
+	if s.detector != nil {
+		s.detector.Reset()
+	}
 	return nil
 }
 
