@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	. "xiaozhi-esp32-server-golang/internal/data/client"
@@ -1083,6 +1084,8 @@ func (l *LLMManager) DoLLmRequest(ctx context.Context, userMessage *schema.Messa
 	return nil
 }
 
+var messageIDSeq atomic.Uint64
+
 // AddMessage 添加消息到聊天历史（统一入口，适用于所有消息类型）
 func (l *LLMManager) AddMessage(ctx context.Context, msg *schema.Message) error {
 	if msg == nil {
@@ -1091,11 +1094,14 @@ func (l *LLMManager) AddMessage(ctx context.Context, msg *schema.Message) error 
 	}
 
 	// 生成 MessageID（使用 MD5 哈希缩短长度，避免超过数据库 varchar(64) 限制）
-	// 原始格式：{SessionID}-{Role}-{Timestamp}
-	rawMessageID := fmt.Sprintf("%s-%s-%d",
+	// 附加单调序号与 tool_call_id，避免同一毫秒内连续保存多条 tool/assistant 消息产生碰撞被去重丢弃
+	seq := messageIDSeq.Add(1)
+	rawMessageID := fmt.Sprintf("%s-%s-%d-%d-%s",
 		l.clientState.SessionID,
 		msg.Role,
-		time.Now().UnixMilli())
+		time.Now().UnixNano(),
+		seq,
+		msg.ToolCallID)
 	// 使用 MD5 哈希生成固定32字符的十六进制字符串
 	hash := md5.Sum([]byte(rawMessageID))
 	messageID := hex.EncodeToString(hash[:])

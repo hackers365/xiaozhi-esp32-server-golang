@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 	"xiaozhi/manager/backend/models"
 
@@ -30,7 +31,7 @@ type SaveMessageRequest struct {
 	AgentID       string                 `json:"agent_id" binding:"required"`
 	SessionID     string                 `json:"session_id,omitempty"`
 	Role          string                 `json:"role" binding:"required,oneof=user assistant system tool"`
-	Content       string                 `json:"content" binding:"required"`
+	Content       string                 `json:"content"`
 	ToolCallID    string                 `json:"tool_call_id,omitempty"`    // 工具调用ID（Tool角色使用）
 	ToolCallsJSON *string                `json:"tool_calls_json,omitempty"` // 工具调用列表JSON（Assistant角色使用），nil 表示 NULL
 	AudioData     string                 `json:"audio_data,omitempty"`      // base64编码
@@ -40,11 +41,42 @@ type SaveMessageRequest struct {
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
+func hasToolCallsJSON(raw *string) bool {
+	if raw == nil {
+		return false
+	}
+	trimmed := strings.TrimSpace(*raw)
+	if trimmed == "" {
+		return false
+	}
+	var toolCalls []json.RawMessage
+	if err := json.Unmarshal([]byte(trimmed), &toolCalls); err != nil {
+		return false
+	}
+	return len(toolCalls) > 0
+}
+
+func applyVisibleHistoryFilter(query *gorm.DB, role string) *gorm.DB {
+	normalizedRole := strings.TrimSpace(role)
+	switch normalizedRole {
+	case "":
+		return query.Where("role IN ? AND (content <> '' OR audio_path <> '')", []string{"user", "assistant"})
+	case "assistant":
+		return query.Where("role = ? AND (content <> '' OR audio_path <> '')", "assistant")
+	default:
+		return query.Where("role = ?", normalizedRole)
+	}
+}
+
 // SaveMessage 保存消息
 func (c *ChatHistoryController) SaveMessage(ctx *gin.Context) {
 	var req SaveMessageRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" && !(req.Role == "assistant" && hasToolCallsJSON(req.ToolCallsJSON)) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "content不能为空"})
 		return
 	}
 
@@ -205,9 +237,7 @@ func (c *ChatHistoryController) GetMessages(ctx *gin.Context) {
 	if sessionID != "" {
 		query = query.Where("session_id = ?", sessionID)
 	}
-	if role != "" {
-		query = query.Where("role = ?", role)
-	}
+	query = applyVisibleHistoryFilter(query, role)
 
 	var total int64
 	query.Count(&total)
@@ -285,10 +315,8 @@ func (c *ChatHistoryController) GetMessagesByAgent(ctx *gin.Context) {
 	query := c.DB.Model(&models.ChatMessage{}).
 		Where("user_id = ? AND agent_id = ? AND is_deleted = ?", userID, agentID, false)
 
-	// 角色筛选
-	if role != "" {
-		query = query.Where("role = ?", role)
-	}
+	// 角色筛选（默认仅返回用户与机器人可见对话消息，隐藏内部 tool/system 及纯 tool_calls 占位消息）
+	query = applyVisibleHistoryFilter(query, role)
 
 	// 设备筛选
 	if deviceID != "" {
@@ -341,12 +369,15 @@ func (c *ChatHistoryController) ExportMessages(ctx *gin.Context) {
 
 	agentID := ctx.Query("agent_id")
 	deviceID := ctx.Query("device_id")
+	role := ctx.Query("role")
 	startDate := ctx.Query("start_date")
 	endDate := ctx.Query("end_date")
 
 	// 构建查询
 	query := c.DB.Model(&models.ChatMessage{}).
 		Where("user_id = ? AND is_deleted = ?", userID, false)
+
+	query = applyVisibleHistoryFilter(query, role)
 
 	if agentID != "" {
 		query = query.Where("agent_id = ?", agentID)

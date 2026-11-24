@@ -8,6 +8,7 @@ import (
 
 	data_client "xiaozhi-esp32-server-golang/internal/data/client"
 	config_types "xiaozhi-esp32-server-golang/internal/domain/config/types"
+	"xiaozhi-esp32-server-golang/internal/domain/eventbus"
 
 	"github.com/cloudwego/eino/schema"
 	mcp_go "github.com/mark3labs/mcp-go/mcp"
@@ -228,6 +229,46 @@ func TestWaitForTTSTurnDrainIfRootSkipsNestedContexts(t *testing.T) {
 		}
 	case <-waitCtx.Done():
 		t.Fatal("root wait did not finish after TTS item completion")
+	}
+}
+
+func TestAddMessageGeneratesUniqueIDsForBurstToolMessages(t *testing.T) {
+	manager := newTestLLMManager(data_client.MemoryModeShort)
+	manager.clientState.SessionID = "sess-burst-tool"
+	manager.lastMessageID = make(map[string]string)
+
+	idCh := make(chan string, 4)
+	handler := func(evt *eventbus.AddMessageEvent) {
+		if evt != nil && evt.ClientState == manager.clientState {
+			idCh <- evt.MessageID
+		}
+	}
+	if err := eventbus.Get().Subscribe(eventbus.TopicAddMessage, handler); err != nil {
+		t.Fatalf("subscribe failed: %v", err)
+	}
+	defer func() {
+		_ = eventbus.Get().Unsubscribe(eventbus.TopicAddMessage, handler)
+	}()
+
+	ctx := context.Background()
+	if err := manager.AddMessage(ctx, schema.ToolMessage("result-1", "call_1")); err != nil {
+		t.Fatalf("AddMessage tool 1 failed: %v", err)
+	}
+	if err := manager.AddMessage(ctx, schema.ToolMessage("result-2", "call_2")); err != nil {
+		t.Fatalf("AddMessage tool 2 failed: %v", err)
+	}
+
+	var ids []string
+	for len(ids) < 2 {
+		select {
+		case id := <-idCh:
+			ids = append(ids, id)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for AddMessage events, got %d", len(ids))
+		}
+	}
+	if ids[0] == "" || ids[1] == "" || ids[0] == ids[1] {
+		t.Fatalf("expected distinct non-empty message IDs for burst tool messages, got %q and %q", ids[0], ids[1])
 	}
 }
 

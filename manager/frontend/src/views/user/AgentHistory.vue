@@ -129,7 +129,7 @@
               </template>
               
               <!-- 右侧：用户消息 -->
-              <template v-else>
+              <template v-else-if="message.role === 'user'">
                 <div class="message-bubble message-bubble-right">
                   <div class="message-content-wrapper">
                     <!-- 文本内容 -->
@@ -276,7 +276,11 @@ const loadMessages = async () => {
 
     const response = await api.get(`/user/history/agents/${agentId.value}/messages`, { params })
     // 后端返回的是按时间倒序（最新在前），需要反转数组使最新的在底部
-    const data = response.data.data || []
+    // 仅展示用户与机器人可见对话消息，避免内部 tool/system 消息被误显示到用户侧
+    const data = (response.data.data || []).filter(msg =>
+      (msg.role === 'user' || msg.role === 'assistant') &&
+      (Boolean(msg.content && String(msg.content).trim()) || Boolean(msg.audio_path))
+    )
     messages.value = [...data].reverse() // 反转数组，最新的在底部
     total.value = response.data.total || 0
     

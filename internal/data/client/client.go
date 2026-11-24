@@ -251,68 +251,6 @@ func AlignMessage(messages []*schema.Message) []*schema.Message {
 	return messages
 }
 */
-// AlignToolMessages 保证 role:tool 消息中的 tool_call_id 与 role:assistant 消息中的 tool_calls 的 id 对应
-// 如果不匹配则删除对应的 tool 消息，同时处理反向不匹配的场景
-func AlignToolMessages(messages []*schema.Message) []*schema.Message {
-	if len(messages) == 0 {
-		return messages
-	}
-
-	// 收集所有 assistant 消息中的 tool_calls id
-	validToolCallIDs := make(map[string]bool)
-	// 收集所有 tool 消息中的 tool_call_id
-	usedToolCallIDs := make(map[string]bool)
-
-	// 第一遍遍历：收集 assistant 消息中的 tool_calls id 和 tool 消息中的 tool_call_id
-	for _, msg := range messages {
-		if msg == nil {
-			continue
-		}
-
-		if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
-			for _, toolCall := range msg.ToolCalls {
-				if toolCall.ID != "" {
-					validToolCallIDs[toolCall.ID] = true
-				}
-			}
-		}
-
-		if msg.Role == schema.Tool && msg.ToolCallID != "" {
-			usedToolCallIDs[msg.ToolCallID] = true
-		}
-	}
-
-	// 过滤消息，处理双向不匹配的情况
-	var alignedMessages []*schema.Message
-	for _, msg := range messages {
-		if msg == nil {
-			continue
-		}
-
-		// 如果是 tool 消息，检查 tool_call_id 是否有效
-		if msg.Role == schema.Tool {
-			if msg.ToolCallID != "" && validToolCallIDs[msg.ToolCallID] {
-				alignedMessages = append(alignedMessages, msg)
-			}
-		} else if msg.Role == schema.Assistant && len(msg.ToolCalls) > 0 {
-			// 处理 assistant 消息，检查是否有未使用的 tool_calls
-			for _, toolCall := range msg.ToolCalls {
-				if toolCall.ID != "" {
-					if usedToolCallIDs[toolCall.ID] {
-						alignedMessages = append(alignedMessages, msg)
-					} else {
-						continue
-					}
-				}
-			}
-		} else {
-			// 其他类型的消息直接保留
-			alignedMessages = append(alignedMessages, msg)
-		}
-	}
-
-	return alignedMessages
-}
 
 func (c *ClientState) InitMessages(messages []*schema.Message) error {
 	c.Dialogue.mu.Lock()
