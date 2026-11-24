@@ -472,6 +472,14 @@
         <!-- 录制音频 -->
         <el-tab-pane label="录制音频" name="record">
           <div class="record-section">
+            <el-alert
+              v-if="!canRecord && recordUnavailableReason"
+              :title="recordUnavailableReason"
+              type="warning"
+              :closable="false"
+              show-icon
+              style="width: 100%; margin-bottom: 16px;"
+            />
             <div class="record-status">
               <div v-if="!isRecording && !recordedBlob" class="record-ready">
                 <el-icon size="48" color="var(--apple-primary)"><Microphone /></el-icon>
@@ -592,6 +600,14 @@
         <!-- 录制音频 -->
         <el-tab-pane label="录制音频" name="record">
           <div class="record-section">
+            <el-alert
+              v-if="!canRecord && recordUnavailableReason"
+              :title="recordUnavailableReason"
+              type="warning"
+              :closable="false"
+              show-icon
+              style="width: 100%; margin-bottom: 16px;"
+            />
             <div class="record-status">
               <div v-if="!isVerifyRecording && !verifyRecordedBlob" class="record-ready">
                 <el-icon size="48" color="var(--apple-primary)"><Microphone /></el-icon>
@@ -709,6 +725,11 @@ import {
   VideoPause
 } from '@element-plus/icons-vue'
 import api from '../../utils/api'
+import {
+  checkAudioRecordingSupport,
+  formatAudioRecordError,
+  requestAudioStream
+} from '../../utils/audioRecorder'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -772,7 +793,15 @@ const recordedBlob = ref(null)
 const recordedBlobUrl = ref('')
 const recordTime = ref(0)
 const recordTimer = ref(null)
-const canRecord = ref(false)
+const canRecord = ref(true)
+const recordUnavailableReason = ref('')
+
+const syncRecordingCapability = () => {
+  const support = checkAudioRecordingSupport()
+  canRecord.value = support.supported
+  recordUnavailableReason.value = support.message || ''
+  return support
+}
 
 // 表单引用
 const groupFormRef = ref()
@@ -1193,18 +1222,11 @@ const handleVerifyGroup = async (group) => {
   verifyUploadRef.value?.clearFiles()
   verifyFileList.value = []
   
-  // 检查浏览器是否支持录音
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    stream.getTracks().forEach(track => track.stop())
-    canRecord.value = true
-  } catch (error) {
-    console.warn('浏览器不支持录音:', error)
-    canRecord.value = false
-    if (verifyMode.value === 'record') {
-      ElMessage.warning('您的浏览器不支持录音功能，请使用上传文件方式')
-      verifyMode.value = 'upload'
-    }
+  // 检查当前浏览器/页面环境是否支持录音（不提前触发麦克风权限弹窗）
+  const support = syncRecordingCapability()
+  if (!support.supported && verifyMode.value === 'record') {
+    ElMessage.warning(support.message)
+    verifyMode.value = 'upload'
   }
 }
 
@@ -1313,14 +1335,12 @@ const startVerifyRecording = async () => {
     verifyRecordedBlob.value = null
     verifyRecordTime.value = 0
 
-    // 获取麦克风权限
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        sampleRate: 16000,
-        echoCancellation: true,
-        noiseSuppression: true
-      }
+    // 获取麦克风权限（若浏览器不支持精确采样率约束，自动降级为默认音频约束）
+    const stream = await requestAudioStream({
+      channelCount: 1,
+      sampleRate: 16000,
+      echoCancellation: true,
+      noiseSuppression: true
     })
 
     // 创建 MediaRecorder
@@ -1385,8 +1405,8 @@ const startVerifyRecording = async () => {
     ElMessage.success('开始录制')
   } catch (error) {
     console.error('录音失败:', error)
-    ElMessage.error('录音失败: ' + error.message)
-    canRecord.value = false
+    ElMessage.error(formatAudioRecordError(error))
+    syncRecordingCapability()
   }
 }
 
@@ -1572,18 +1592,11 @@ const handleAddSample = async () => {
     await loadHistoryMessages()
   }
   
-  // 检查浏览器是否支持录音
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-    stream.getTracks().forEach(track => track.stop())
-    canRecord.value = true
-  } catch (error) {
-    console.warn('浏览器不支持录音:', error)
-    canRecord.value = false
-    if (uploadMode.value === 'record') {
-      ElMessage.warning('您的浏览器不支持录音功能，请使用上传文件方式')
-      uploadMode.value = 'upload'
-    }
+  // 检查当前浏览器/页面环境是否支持录音（不提前触发麦克风权限弹窗）
+  const support = syncRecordingCapability()
+  if (!support.supported && uploadMode.value === 'record') {
+    ElMessage.warning(support.message)
+    uploadMode.value = 'upload'
   }
 }
 
@@ -1658,14 +1671,12 @@ const startRecording = async () => {
     recordedBlob.value = null
     recordTime.value = 0
 
-    // 获取麦克风权限
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        sampleRate: 16000,
-        echoCancellation: true,
-        noiseSuppression: true
-      }
+    // 获取麦克风权限（若浏览器不支持精确采样率约束，自动降级为默认音频约束）
+    const stream = await requestAudioStream({
+      channelCount: 1,
+      sampleRate: 16000,
+      echoCancellation: true,
+      noiseSuppression: true
     })
 
     // 创建 MediaRecorder（使用 WAV 格式）
@@ -1732,8 +1743,8 @@ const startRecording = async () => {
     ElMessage.success('开始录制')
   } catch (error) {
     console.error('录音失败:', error)
-    ElMessage.error('录音失败: ' + error.message)
-    canRecord.value = false
+    ElMessage.error(formatAudioRecordError(error))
+    syncRecordingCapability()
   }
 }
 

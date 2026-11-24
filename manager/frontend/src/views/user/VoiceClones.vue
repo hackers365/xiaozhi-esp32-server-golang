@@ -129,7 +129,15 @@
         </el-form-item>
 
         <el-form-item v-else label="浏览器录音" required>
-          <el-button :disabled="isRecording" @click="startRecording">开始录音</el-button>
+          <el-alert
+            v-if="!recordCapability.supported"
+            :title="recordCapability.message"
+            type="warning"
+            :closable="false"
+            show-icon
+            style="width: 100%; margin-bottom: 10px"
+          />
+          <el-button :disabled="isRecording || !recordCapability.supported" @click="startRecording">开始录音</el-button>
           <el-button :disabled="!isRecording" type="warning" @click="stopRecording">停止录音</el-button>
           <audio v-if="recordPreviewUrl" :src="recordPreviewUrl" controls style="display:block;width:100%;margin-top:10px" />
           <div class="help">{{ audioRequirementText }}</div>
@@ -236,6 +244,11 @@ import { computed, nextTick, ref, onBeforeUnmount, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../utils/api'
 import { useAuthStore } from '../../stores/auth'
+import {
+  checkAudioRecordingSupport,
+  formatAudioRecordError,
+  requestAudioStream
+} from '../../utils/audioRecorder'
 
 const authStore = useAuthStore()
 const loading = ref(false)
@@ -691,8 +704,24 @@ const audioBufferToWav = (buffer) => {
   return arrayBuffer
 }
 
+const recordCapability = ref(checkAudioRecordingSupport())
+
 const startRecording = async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  recordCapability.value = checkAudioRecordingSupport()
+  if (!recordCapability.value.supported) {
+    ElMessage.warning(recordCapability.value.message)
+    return
+  }
+
+  let stream
+  try {
+    stream = await requestAudioStream(true)
+  } catch (error) {
+    console.error('录音失败:', error)
+    ElMessage.error(formatAudioRecordError(error))
+    recordCapability.value = checkAudioRecordingSupport()
+    return
+  }
   recordChunks.value = []
   form.value.audioDurationSec = 0
   const recorderOptions = { mimeType: 'audio/webm;codecs=opus' }
